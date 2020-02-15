@@ -194,9 +194,22 @@ const RefreshRate& RefreshRateConfigs::getRefreshRateForContentV2(
         }
     }
 
-    float max = 0;
+    // Now that we scored all the refresh rates we need to pick the one that got the highest score.
+    // In case of a tie we will pick the higher refresh rate if any of the layers wanted Max,
+    // or the lower otherwise.
+    const RefreshRate* bestRefreshRate = maxVoteLayers > 0
+            ? getBestRefreshRate(scores.rbegin(), scores.rend())
+            : getBestRefreshRate(scores.begin(), scores.end());
+
+    return bestRefreshRate == nullptr ? *mCurrentRefreshRate : *bestRefreshRate;
+}
+
+template <typename Iter>
+const RefreshRate* RefreshRateConfigs::getBestRefreshRate(Iter begin, Iter end) const {
     const RefreshRate* bestRefreshRate = nullptr;
-    for (const auto [refreshRate, score] : scores) {
+    float max = 0;
+    for (auto i = begin; i != end; ++i) {
+        const auto [refreshRate, score] = *i;
         ALOGV("%s scores %.2f", refreshRate->name.c_str(), score);
 
         ATRACE_INT(refreshRate->name.c_str(), round<int>(score * 100));
@@ -207,7 +220,7 @@ const RefreshRate& RefreshRateConfigs::getRefreshRateForContentV2(
         }
     }
 
-    return bestRefreshRate == nullptr ? *mCurrentRefreshRate : *bestRefreshRate;
+    return bestRefreshRate;
 }
 
 const AllRefreshRatesMapType& RefreshRateConfigs::getAllRefreshRates() const {
@@ -227,6 +240,15 @@ const RefreshRate& RefreshRateConfigs::getMaxRefreshRateByPolicy() const {
 const RefreshRate& RefreshRateConfigs::getCurrentRefreshRate() const {
     std::lock_guard lock(mLock);
     return *mCurrentRefreshRate;
+}
+
+const RefreshRate& RefreshRateConfigs::getCurrentRefreshRateByPolicy() const {
+    std::lock_guard lock(mLock);
+    if (std::find(mAvailableRefreshRates.begin(), mAvailableRefreshRates.end(),
+                  mCurrentRefreshRate) != mAvailableRefreshRates.end()) {
+        return *mCurrentRefreshRate;
+    }
+    return mRefreshRates.at(mDefaultConfig);
 }
 
 void RefreshRateConfigs::setCurrentConfigId(HwcConfigIndexType configId) {

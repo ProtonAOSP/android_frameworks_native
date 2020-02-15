@@ -149,6 +149,10 @@ public:
     // Returns the current refresh rate
     const RefreshRate& getCurrentRefreshRate() const EXCLUDES(mLock);
 
+    // Returns the current refresh rate, if allowed. Otherwise the default that is allowed by
+    // the policy.
+    const RefreshRate& getCurrentRefreshRateByPolicy() const;
+
     // Returns the refresh rate that corresponds to a HwcConfigIndexType. This won't change at
     // runtime.
     const RefreshRate& getRefreshRateFromConfigId(HwcConfigIndexType configId) const {
@@ -177,6 +181,12 @@ private:
     void getSortedRefreshRateList(
             const std::function<bool(const RefreshRate&)>& shouldAddRefreshRate,
             std::vector<const RefreshRate*>* outRefreshRates);
+
+    // Returns the refresh rate with the highest score in the collection specified from begin
+    // to end. If there are more than one with the same highest refresh rate, the first one is
+    // returned.
+    template <typename Iter>
+    const RefreshRate* getBestRefreshRate(Iter begin, Iter end) const;
 
     // The list of refresh rates, indexed by display config ID. This must not change after this
     // object is initialized.

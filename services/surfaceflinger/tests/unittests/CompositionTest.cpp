@@ -35,7 +35,7 @@
 #include <utils/String8.h>
 
 #include "BufferQueueLayer.h"
-#include "ColorLayer.h"
+#include "EffectLayer.h"
 #include "Layer.h"
 #include "TestableSurfaceFlinger.h"
 #include "mock/DisplayHardware/MockComposer.h"
@@ -116,8 +116,6 @@ public:
 
     void setupComposer(int virtualDisplayCount) {
         mComposer = new Hwc2::mock::Composer();
-        EXPECT_CALL(*mComposer, getCapabilities())
-                .WillOnce(Return(std::vector<IComposer::Capability>()));
         EXPECT_CALL(*mComposer, getMaxVirtualDisplayCount()).WillOnce(Return(virtualDisplayCount));
         mFlinger.setupComposer(std::unique_ptr<Hwc2::Composer>(mComposer));
 
@@ -286,13 +284,14 @@ struct BaseDisplayVariant {
         EXPECT_CALL(*test->mNativeWindow, perform(NATIVE_WINDOW_SET_BUFFERS_FORMAT)).Times(1);
         EXPECT_CALL(*test->mNativeWindow, perform(NATIVE_WINDOW_API_CONNECT)).Times(1);
         EXPECT_CALL(*test->mNativeWindow, perform(NATIVE_WINDOW_SET_USAGE64)).Times(1);
-        test->mDisplay = FakeDisplayDeviceInjector(test->mFlinger, DEFAULT_DISPLAY_ID,
-                                                   false /* isVirtual */, true /* isPrimary */)
-                                 .setDisplaySurface(test->mDisplaySurface)
-                                 .setNativeWindow(test->mNativeWindow)
-                                 .setSecure(Derived::IS_SECURE)
-                                 .setPowerMode(Derived::INIT_POWER_MODE)
-                                 .inject();
+        test->mDisplay =
+                FakeDisplayDeviceInjector(test->mFlinger, DEFAULT_DISPLAY_ID,
+                                          DisplayConnectionType::Internal, true /* isPrimary */)
+                        .setDisplaySurface(test->mDisplaySurface)
+                        .setNativeWindow(test->mNativeWindow)
+                        .setSecure(Derived::IS_SECURE)
+                        .setPowerMode(Derived::INIT_POWER_MODE)
+                        .inject();
         Mock::VerifyAndClear(test->mNativeWindow);
         test->mDisplay->setLayerStack(DEFAULT_LAYER_STACK);
     }
@@ -713,7 +712,7 @@ struct BaseLayerProperties {
 
 struct DefaultLayerProperties : public BaseLayerProperties<DefaultLayerProperties> {};
 
-struct ColorLayerProperties : public BaseLayerProperties<ColorLayerProperties> {
+struct EffectLayerProperties : public BaseLayerProperties<EffectLayerProperties> {
     static constexpr IComposerClient::BlendMode BLENDMODE = IComposerClient::BlendMode::NONE;
 };
 
@@ -866,16 +865,16 @@ struct BaseLayerVariant {
 };
 
 template <typename LayerProperties>
-struct ColorLayerVariant : public BaseLayerVariant<LayerProperties> {
+struct EffectLayerVariant : public BaseLayerVariant<LayerProperties> {
     using Base = BaseLayerVariant<LayerProperties>;
-    using FlingerLayerType = sp<ColorLayer>;
+    using FlingerLayerType = sp<EffectLayer>;
 
     static FlingerLayerType createLayer(CompositionTest* test) {
-        FlingerLayerType layer = Base::template createLayerWithFactory<ColorLayer>(test, [test]() {
-            return new ColorLayer(LayerCreationArgs(test->mFlinger.mFlinger.get(), sp<Client>(),
-                                                    "test-layer", LayerProperties::WIDTH,
-                                                    LayerProperties::HEIGHT,
-                                                    LayerProperties::LAYER_FLAGS, LayerMetadata()));
+        FlingerLayerType layer = Base::template createLayerWithFactory<EffectLayer>(test, [test]() {
+            return new EffectLayer(
+                    LayerCreationArgs(test->mFlinger.mFlinger.get(), sp<Client>(), "test-layer",
+                                      LayerProperties::WIDTH, LayerProperties::HEIGHT,
+                                      LayerProperties::LAYER_FLAGS, LayerMetadata()));
         });
 
         auto& layerDrawingState = test->mFlinger.mutableLayerDrawingState(layer);
@@ -1228,31 +1227,31 @@ TEST_F(CompositionTest, captureScreenNormalBufferLayer) {
  *  Single-color layers
  */
 
-TEST_F(CompositionTest, HWCComposedColorLayerWithDirtyGeometry) {
+TEST_F(CompositionTest, HWCComposedEffectLayerWithDirtyGeometry) {
     displayRefreshCompositionDirtyGeometry<
-            CompositionCase<DefaultDisplaySetupVariant, ColorLayerVariant<ColorLayerProperties>,
+            CompositionCase<DefaultDisplaySetupVariant, EffectLayerVariant<EffectLayerProperties>,
                             KeepCompositionTypeVariant<IComposerClient::Composition::SOLID_COLOR>,
                             HwcCompositionResultVariant>>();
 }
 
-TEST_F(CompositionTest, HWCComposedColorLayerWithDirtyFrame) {
+TEST_F(CompositionTest, HWCComposedEffectLayerWithDirtyFrame) {
     displayRefreshCompositionDirtyFrame<
-            CompositionCase<DefaultDisplaySetupVariant, ColorLayerVariant<ColorLayerProperties>,
+            CompositionCase<DefaultDisplaySetupVariant, EffectLayerVariant<EffectLayerProperties>,
                             KeepCompositionTypeVariant<IComposerClient::Composition::SOLID_COLOR>,
                             HwcCompositionResultVariant>>();
 }
 
-TEST_F(CompositionTest, REComposedColorLayer) {
+TEST_F(CompositionTest, REComposedEffectLayer) {
     displayRefreshCompositionDirtyFrame<
-            CompositionCase<DefaultDisplaySetupVariant, ColorLayerVariant<ColorLayerProperties>,
+            CompositionCase<DefaultDisplaySetupVariant, EffectLayerVariant<EffectLayerProperties>,
                             ChangeCompositionTypeVariant<IComposerClient::Composition::SOLID_COLOR,
                                                          IComposerClient::Composition::CLIENT>,
                             RECompositionResultVariant>>();
 }
 
-TEST_F(CompositionTest, captureScreenColorLayer) {
+TEST_F(CompositionTest, captureScreenEffectLayer) {
     captureScreenComposition<
-            CompositionCase<DefaultDisplaySetupVariant, ColorLayerVariant<ColorLayerProperties>,
+            CompositionCase<DefaultDisplaySetupVariant, EffectLayerVariant<EffectLayerProperties>,
                             NoCompositionTypeVariant, REScreenshotResultVariant>>();
 }
 
