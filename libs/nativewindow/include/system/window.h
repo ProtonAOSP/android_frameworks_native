@@ -1015,8 +1015,10 @@ static inline int native_window_set_auto_prerotation(struct ANativeWindow* windo
     return window->perform(window, NATIVE_WINDOW_SET_AUTO_PREROTATION, autoPrerotation);
 }
 
-static inline int native_window_set_frame_rate(struct ANativeWindow* window, float frameRate) {
-    return window->perform(window, NATIVE_WINDOW_SET_FRAME_RATE, (double)frameRate);
+static inline int native_window_set_frame_rate(struct ANativeWindow* window, float frameRate,
+                                               int8_t compatibility) {
+    return window->perform(window, NATIVE_WINDOW_SET_FRAME_RATE, (double)frameRate,
+                           (int)compatibility);
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -1047,6 +1049,17 @@ static inline int ANativeWindow_getLastQueuedBuffer(ANativeWindow* window,
                                                     float outTransformMatrix[16]) {
     return window->perform(window, NATIVE_WINDOW_GET_LAST_QUEUED_BUFFER, outBuffer, outFence,
                            outTransformMatrix);
+}
+
+/**
+ * Retrieves an identifier for the next frame to be queued by this window.
+ *
+ * \return the next frame id.
+ */
+static inline int64_t ANativeWindow_getNextFrameId(ANativeWindow* window) {
+    int64_t value;
+    window->perform(window, NATIVE_WINDOW_GET_NEXT_FRAME_ID, &value);
+    return value;
 }
 
 __END_DECLS
