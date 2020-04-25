@@ -1415,7 +1415,7 @@ status_t SurfaceFlinger::enableVSyncInjections(bool enable) {
 
 status_t SurfaceFlinger::injectVSync(nsecs_t when) {
     Mutex::Autolock lock(mStateLock);
-    return mScheduler->injectVSync(when) ? NO_ERROR : BAD_VALUE;
+    return mScheduler->injectVSync(when, calculateExpectedPresentTime(when)) ? NO_ERROR : BAD_VALUE;
 }
 
 status_t SurfaceFlinger::getLayerDebugInfo(std::vector<LayerDebugInfo>* outLayers) const
@@ -1826,16 +1826,16 @@ nsecs_t SurfaceFlinger::previousFramePresentTime() NO_THREAD_SAFETY_ANALYSIS {
     return fence->getSignalTime();
 }
 
-void SurfaceFlinger::populateExpectedPresentTime(nsecs_t wakeupTime) {
+nsecs_t SurfaceFlinger::calculateExpectedPresentTime(nsecs_t now) const {
     DisplayStatInfo stats;
     mScheduler->getDisplayStatInfo(&stats);
-    const nsecs_t presentTime = mScheduler->getDispSyncExpectedPresentTime(wakeupTime);
+    const nsecs_t presentTime = mScheduler->getDispSyncExpectedPresentTime(now);
     // Inflate the expected present time if we're targetting the next vsync.
-    mExpectedPresentTime.store(
-            mVSyncModulator->getOffsets().sf > 0 ? presentTime : presentTime + stats.vsyncPeriod);
+    return mVSyncModulator->getOffsets().sf > 0 ? presentTime : presentTime + stats.vsyncPeriod;
 }
 
-void SurfaceFlinger::onMessageReceived(int32_t what, nsecs_t when) NO_THREAD_SAFETY_ANALYSIS {
+void SurfaceFlinger::onMessageReceived(int32_t what,
+                                       nsecs_t expectedVSyncTime) NO_THREAD_SAFETY_ANALYSIS {
     ATRACE_CALL();
     switch (what) {
         case MessageQueue::INVALIDATE: {
@@ -1844,7 +1844,7 @@ void SurfaceFlinger::onMessageReceived(int32_t what, nsecs_t when) NO_THREAD_SAF
             // value throughout this frame to make sure all layers are
             // seeing this same value.
             const nsecs_t lastExpectedPresentTime = mExpectedPresentTime.load();
-            populateExpectedPresentTime(when);
+            mExpectedPresentTime = expectedVSyncTime;
 
             // When Backpressure propagation is enabled we want to give a small grace period
             // for the present fence to fire instead of just giving up on this frame to handle cases
@@ -2364,6 +2364,10 @@ void SurfaceFlinger::postComposition()
     }
 }
 
+FloatRect SurfaceFlinger::getLayerClipBoundsForDisplay(const DisplayDevice& displayDevice) const {
+    return displayDevice.getViewport().toFloatRect();
+}
+
 void SurfaceFlinger::computeLayerBounds() {
     for (const auto& pair : mDisplays) {
         const auto& displayDevice = pair.second;
@@ -2374,7 +2378,7 @@ void SurfaceFlinger::computeLayerBounds() {
                 continue;
             }
 
-            layer->computeBounds(displayDevice->getViewport().toFloatRect(), ui::Transform(),
+            layer->computeBounds(getLayerClipBoundsForDisplay(*displayDevice), ui::Transform(),
                                  0.f /* shadowRadius */);
         }
     }
@@ -3244,7 +3248,6 @@ bool SurfaceFlinger::flushTransactionQueues() {
             while (!transactionQueue.empty()) {
                 const auto& transaction = transactionQueue.front();
                 if (!transactionIsReadyToBeApplied(transaction.desiredPresentTime,
-                                                   true /* useCachedExpectedPresentTime */,
                                                    transaction.states)) {
                     setTransactionFlags(eTransactionFlushNeeded);
                     break;
@@ -3276,9 +3279,7 @@ bool SurfaceFlinger::transactionFlushNeeded() {
 
 
 bool SurfaceFlinger::transactionIsReadyToBeApplied(int64_t desiredPresentTime,
-                                                   bool useCachedExpectedPresentTime,
                                                    const Vector<ComposerState>& states) {
-    if (!useCachedExpectedPresentTime) populateExpectedPresentTime(systemTime());
 
     const nsecs_t expectedPresentTime = mExpectedPresentTime.load();
     // Do not present if the desiredPresentTime has not passed unless it is more than one second
@@ -3330,9 +3331,13 @@ void SurfaceFlinger::setTransactionState(
         }
     }
 
+    const bool pendingTransactions = itr != mTransactionQueues.end();
     // Expected present time is computed and cached on invalidate, so it may be stale.
-    if (itr != mTransactionQueues.end() || !transactionIsReadyToBeApplied(
-            desiredPresentTime, false /* useCachedExpectedPresentTime */, states)) {
+    if (!pendingTransactions) {
+        mExpectedPresentTime = calculateExpectedPresentTime(systemTime());
+    }
+
+    if (pendingTransactions || !transactionIsReadyToBeApplied(desiredPresentTime, states)) {
         mTransactionQueues[applyToken].emplace(states, displays, flags, desiredPresentTime,
                                                uncacheBuffer, postTime, privileged,
                                                hasListenerCallbacks, listenerCallbacks);
@@ -5667,13 +5672,13 @@ status_t SurfaceFlinger::captureScreenCommon(RenderArea& renderArea,
                                              usage, "screenshot");
 
     return captureScreenCommon(renderArea, traverseLayers, *outBuffer, useIdentityTransform,
-                               outCapturedSecureLayers);
+                               false /* regionSampling */, outCapturedSecureLayers);
 }
 
 status_t SurfaceFlinger::captureScreenCommon(RenderArea& renderArea,
                                              TraverseLayersFunction traverseLayers,
                                              const sp<GraphicBuffer>& buffer,
-                                             bool useIdentityTransform,
+                                             bool useIdentityTransform, bool regionSampling,
                                              bool& outCapturedSecureLayers) {
     // This mutex protects syncFd and captureResult for communication of the return values from the
     // main thread back to this Binder thread
@@ -5704,7 +5709,7 @@ status_t SurfaceFlinger::captureScreenCommon(RenderArea& renderArea,
             renderArea.render([&] {
                 result = captureScreenImplLocked(renderArea, traverseLayers, buffer.get(),
                                                  useIdentityTransform, forSystem, &fd,
-                                                 outCapturedSecureLayers);
+                                                 regionSampling, outCapturedSecureLayers);
             });
         }
 
@@ -5741,7 +5746,7 @@ status_t SurfaceFlinger::captureScreenCommon(RenderArea& renderArea,
 void SurfaceFlinger::renderScreenImplLocked(const RenderArea& renderArea,
                                             TraverseLayersFunction traverseLayers,
                                             ANativeWindowBuffer* buffer, bool useIdentityTransform,
-                                            int* outSyncFd) {
+                                            bool regionSampling, int* outSyncFd) {
     ATRACE_CALL();
 
     const auto reqWidth = renderArea.getReqWidth();
@@ -5797,6 +5802,12 @@ void SurfaceFlinger::renderScreenImplLocked(const RenderArea& renderArea,
             for (auto& settings : results) {
                 settings.geometry.positionTransform =
                         transform.asMatrix4() * settings.geometry.positionTransform;
+                // There's no need to process blurs when we're executing region sampling,
+                // we're just trying to understand what we're drawing, and doing so without
+                // blurs is already a pretty good approximation.
+                if (regionSampling) {
+                    settings.backgroundBlurRadius = 0;
+                }
             }
             clientCompositionLayers.insert(clientCompositionLayers.end(),
                                            std::make_move_iterator(results.begin()),
@@ -5834,7 +5845,8 @@ status_t SurfaceFlinger::captureScreenImplLocked(const RenderArea& renderArea,
                                                  TraverseLayersFunction traverseLayers,
                                                  ANativeWindowBuffer* buffer,
                                                  bool useIdentityTransform, bool forSystem,
-                                                 int* outSyncFd, bool& outCapturedSecureLayers) {
+                                                 int* outSyncFd, bool regionSampling,
+                                                 bool& outCapturedSecureLayers) {
     ATRACE_CALL();
 
     traverseLayers([&](Layer* layer) {
@@ -5849,7 +5861,8 @@ status_t SurfaceFlinger::captureScreenImplLocked(const RenderArea& renderArea,
         ALOGW("FB is protected: PERMISSION_DENIED");
         return PERMISSION_DENIED;
     }
-    renderScreenImplLocked(renderArea, traverseLayers, buffer, useIdentityTransform, outSyncFd);
+    renderScreenImplLocked(renderArea, traverseLayers, buffer, useIdentityTransform, regionSampling,
+                           outSyncFd);
     return NO_ERROR;
 }
 

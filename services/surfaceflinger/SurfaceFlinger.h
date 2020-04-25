@@ -315,7 +315,7 @@ public:
     // called on the main thread by MessageQueue when an internal message
     // is received
     // TODO: this should be made accessible only to MessageQueue
-    void onMessageReceived(int32_t what, nsecs_t when);
+    void onMessageReceived(int32_t what, nsecs_t expectedVSyncTime);
 
     renderengine::RenderEngine& getRenderEngine() const;
 
@@ -630,7 +630,6 @@ private:
     void commitTransaction() REQUIRES(mStateLock);
     void commitOffscreenLayers();
     bool transactionIsReadyToBeApplied(int64_t desiredPresentTime,
-                                       bool useCachedExpectedPresentTime,
                                        const Vector<ComposerState>& states);
     uint32_t setDisplayStateLocked(const DisplayState& s) REQUIRES(mStateLock);
     uint32_t addInputWindowCommands(const InputWindowCommands& inputWindowCommands)
@@ -643,6 +642,13 @@ protected:
             std::unordered_set<ListenerCallbacks, ListenerCallbacksHash>& listenerCallbacks)
             REQUIRES(mStateLock);
     virtual void commitTransactionLocked();
+
+    // Used internally by computeLayerBounds() to gets the clip rectangle to use for the
+    // root layers on a particular display in layer-coordinate space. The
+    // layers (and effectively their children) will be clipped against this
+    // rectangle. The base behavior is to clip to the visible region of the
+    // display.
+    virtual FloatRect getLayerClipBoundsForDisplay(const DisplayDevice&) const;
 
 private:
     /* ------------------------------------------------------------------------
@@ -702,19 +708,20 @@ private:
 
     void renderScreenImplLocked(const RenderArea& renderArea, TraverseLayersFunction traverseLayers,
                                 ANativeWindowBuffer* buffer, bool useIdentityTransform,
-                                int* outSyncFd);
+                                bool regionSampling, int* outSyncFd);
     status_t captureScreenCommon(RenderArea& renderArea, TraverseLayersFunction traverseLayers,
                                  sp<GraphicBuffer>* outBuffer, const ui::PixelFormat reqPixelFormat,
                                  bool useIdentityTransform, bool& outCapturedSecureLayers);
     status_t captureScreenCommon(RenderArea& renderArea, TraverseLayersFunction traverseLayers,
                                  const sp<GraphicBuffer>& buffer, bool useIdentityTransform,
-                                 bool& outCapturedSecureLayers);
+                                 bool regionSampling, bool& outCapturedSecureLayers);
     const sp<DisplayDevice> getDisplayByIdOrLayerStack(uint64_t displayOrLayerStack);
     const sp<DisplayDevice> getDisplayByLayerStack(uint64_t layerStack);
     status_t captureScreenImplLocked(const RenderArea& renderArea,
                                      TraverseLayersFunction traverseLayers,
                                      ANativeWindowBuffer* buffer, bool useIdentityTransform,
-                                     bool forSystem, int* outSyncFd, bool& outCapturedSecureLayers);
+                                     bool forSystem, int* outSyncFd, bool regionSampling,
+                                     bool& outCapturedSecureLayers);
     void traverseLayersInDisplay(const sp<const DisplayDevice>& display,
                                  const LayerVector::Visitor& visitor);
 
@@ -852,9 +859,9 @@ private:
     // Must be called on the main thread.
     nsecs_t previousFramePresentTime();
 
-    // Populates the expected present time for this frame. For negative offsets, performs a
+    // Calculates the expected present time for this frame. For negative offsets, performs a
     // correction using the predicted vsync for the next frame instead.
-    void populateExpectedPresentTime(nsecs_t now);
+    nsecs_t calculateExpectedPresentTime(nsecs_t now) const;
 
     /*
      * Display identification
