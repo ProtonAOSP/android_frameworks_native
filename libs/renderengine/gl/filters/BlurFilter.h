@@ -56,8 +56,8 @@ private:
     uint32_t mPasses;
     float mOffset;
 
-    void createVertexArray(GLuint* vertexArray, GLuint uv, GLuint position);
-    void drawMesh(GLuint uv, GLuint position);
+    void createVertexArray(GLuint* vertexArray, GLuint position, GLuint uv);
+    void drawMesh(GLuint vertexArray);
     string getVertexShader() const;
     string getDownsampleFragShader() const;
     string getUpsampleFragShader() const;
