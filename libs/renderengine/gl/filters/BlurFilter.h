@@ -36,7 +36,7 @@ namespace gl {
 class BlurFilter {
 public:
     // Downsample FBO to improve performance
-    static constexpr float kFboScale = 0.2f;
+    static constexpr float kFboScale = 1.f;
     // To avoid downscaling artifacts, we interpolate the blurred fbo with the full composited
     // image, up to this radius.
     static constexpr float kMaxCrossFadeRadius = 30.0f;
@@ -55,7 +55,8 @@ private:
     uint32_t mRadius;
     void drawMesh(GLuint uv, GLuint position);
     string getVertexShader() const;
-    string getFragmentShader() const;
+    string getDownsampleFragShader() const;
+    string getUpsampleFragShader() const;
     string getMixFragShader() const;
 
     GLESRenderEngine& mEngine;
@@ -81,11 +82,19 @@ private:
     GLuint mMTextureLoc;
     GLuint mMCompositionTextureLoc;
 
-    GenericProgram mBlurProgram;
-    GLuint mBPosLoc;
-    GLuint mBUvLoc;
-    GLuint mBTextureLoc;
-    GLuint mBOffsetLoc;
+    GenericProgram mDownsampleProgram;
+    GLuint mDPosLoc;
+    GLuint mDUvLoc;
+    GLuint mDTextureLoc;
+    GLuint mDOffsetLoc;
+    GLuint mDHalfPixelLoc;
+
+    GenericProgram mUpsampleProgram;
+    GLuint mUPosLoc;
+    GLuint mUUvLoc;
+    GLuint mUTextureLoc;
+    GLuint mUOffsetLoc;
+    GLuint mUHalfPixelLoc;
 };
 
 } // namespace gl

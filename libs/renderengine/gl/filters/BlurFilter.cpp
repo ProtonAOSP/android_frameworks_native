@@ -36,7 +36,8 @@ BlurFilter::BlurFilter(GLESRenderEngine& engine)
         mPingFbo(engine),
         mPongFbo(engine),
         mMixProgram(engine),
-        mBlurProgram(engine) {
+        mDownsampleProgram(engine),
+        mUpsampleProgram(engine) {
     mMixProgram.compile(getVertexShader(), getMixFragShader());
     mMPosLoc = mMixProgram.getAttributeLocation("aPosition");
     mMUvLoc = mMixProgram.getAttributeLocation("aUV");
@@ -44,11 +45,19 @@ BlurFilter::BlurFilter(GLESRenderEngine& engine)
     mMCompositionTextureLoc = mMixProgram.getUniformLocation("uCompositionTexture");
     mMMixLoc = mMixProgram.getUniformLocation("uMix");
 
-    mBlurProgram.compile(getVertexShader(), getFragmentShader());
-    mBPosLoc = mBlurProgram.getAttributeLocation("aPosition");
-    mBUvLoc = mBlurProgram.getAttributeLocation("aUV");
-    mBTextureLoc = mBlurProgram.getUniformLocation("uTexture");
-    mBOffsetLoc = mBlurProgram.getUniformLocation("uOffset");
+    mDownsampleProgram.compile(getVertexShader(), getDownsampleFragShader());
+    mDPosLoc = mDownsampleProgram.getAttributeLocation("aPosition");
+    mDUvLoc = mDownsampleProgram.getAttributeLocation("aUV");
+    mDTextureLoc = mDownsampleProgram.getUniformLocation("uTexture");
+    mDOffsetLoc = mDownsampleProgram.getUniformLocation("uOffset");
+    mDHalfPixelLoc = mDownsampleProgram.getUniformLocation("uHalfPixel");
+
+    mUpsampleProgram.compile(getVertexShader(), getUpsampleFragShader());
+    mUPosLoc = mUpsampleProgram.getAttributeLocation("aPosition");
+    mUUvLoc = mUpsampleProgram.getAttributeLocation("aUV");
+    mUTextureLoc = mUpsampleProgram.getUniformLocation("uTexture");
+    mUOffsetLoc = mUpsampleProgram.getUniformLocation("uOffset");
+    mUHalfPixelLoc = mUpsampleProgram.getUniformLocation("uHalfPixel");
 
     static constexpr auto size = 2.0f;
     static constexpr auto translation = 1.0f;
@@ -96,8 +105,12 @@ status_t BlurFilter::setAsDrawTarget(const DisplaySettings& display, uint32_t ra
             ALOGE("Invalid composition buffer");
             return mCompositionFbo.getStatus();
         }
-        if (!mBlurProgram.isValid()) {
-            ALOGE("Invalid shader");
+        if (!mDownsampleProgram.isValid()) {
+            ALOGE("Invalid downsample shader");
+            return GL_INVALID_OPERATION;
+        }
+        if (!mUpsampleProgram.isValid()) {
+            ALOGE("Invalid upsample shader");
             return GL_INVALID_OPERATION;
         }
     }
@@ -128,45 +141,95 @@ status_t BlurFilter::prepare() {
     // Kawase is an approximation of Gaussian, but it behaves differently from it.
     // A radius transformation is required for approximating them, and also to introduce
     // non-integer steps, necessary to smoothly interpolate large radii.
-    const auto radius = mRadius / 6.0f;
+    //const auto radius = mRadius / 6.0f;
 
     // Calculate how many passes we'll do, based on the radius.
-    const auto passes = max((uint32_t)1, (uint32_t)ceil(radius));
+    const auto passes = 5.f;
 
-    const float radiusByPasses = radius / (float)passes;
-    const float stepX = radiusByPasses / (float)mCompositionFbo.getBufferWidth();
-    const float stepY = radiusByPasses / (float)mCompositionFbo.getBufferHeight();
+    //const float radiusByPasses = radius / (float)passes;
+    const float stepX = 7.25f;
+    const float stepY = stepX;
 
-    // Let's start by downsampling and blurring the composited frame simultaneously.
-    mBlurProgram.useProgram();
+    auto targetWidth = mPingFbo.getBufferWidth();
+    auto targetHeight = mPingFbo.getBufferHeight();
+
+    // Let's start by downsampling and blurring the composited frame simultaneously. (1 pass done here)
+    //mDownsampleProgram.useProgram();
+    mDownsampleProgram.useProgram();
+    glUniform1i(mDTextureLoc, 0);
+    glUniform2f(mDOffsetLoc, stepX, stepY);
+    glUniform2f(mDHalfPixelLoc, 0.5 / targetWidth, 0.5 / targetHeight);
+    glUniform2f(mUHalfPixelLoc, 0.5 / targetWidth, 0.5 / targetHeight);
     glActiveTexture(GL_TEXTURE0);
-    glUniform1i(mBTextureLoc, 0);
     glBindTexture(GL_TEXTURE_2D, mCompositionFbo.getTextureName());
-    glUniform2f(mBOffsetLoc, stepX, stepY);
-    glViewport(0, 0, mPingFbo.getBufferWidth(), mPingFbo.getBufferHeight());
+    glViewport(0, 0, targetWidth, targetHeight);
     mPingFbo.bind();
-    drawMesh(mBUvLoc, mBPosLoc);
+    drawMesh(mDUvLoc, mDPosLoc);
 
-    // And now we'll ping pong between our textures, to accumulate the result of various offsets.
     GLFramebuffer* read = &mPingFbo;
     GLFramebuffer* draw = &mPongFbo;
-    glViewport(0, 0, draw->getBufferWidth(), draw->getBufferHeight());
-    for (auto i = 1; i < passes; i++) {
-        ATRACE_NAME("BlurFilter::renderPass");
+
+    ALOGI("BLUR: prepare - initial dims %dx%d", targetWidth, targetHeight);
+
+    // Set up downsampling shader
+
+    targetWidth /= 2;
+    targetHeight /= 2;
+    // Downsample
+    for (auto i = 0; i < passes; i++) {
+        ATRACE_NAME("BlurFilter::renderDownsamplePass");
+        ALOGI("BLUR: downsample to %dx%d", targetWidth, targetHeight);
+        glViewport(0, 0, targetWidth, targetHeight);
         draw->bind();
 
         glBindTexture(GL_TEXTURE_2D, read->getTextureName());
-        glUniform2f(mBOffsetLoc, stepX * i, stepY * i);
-
-        drawMesh(mBUvLoc, mBPosLoc);
+        glUniform2f(mDOffsetLoc, stepX, stepY);
+        glUniform2f(mDHalfPixelLoc, 0.5 / targetWidth, 0.5 / targetHeight);
+        drawMesh(mDUvLoc, mDPosLoc);
 
         // Swap buffers for next iteration
         auto tmp = draw;
         draw = read;
         read = tmp;
-    }
-    mLastDrawTarget = read;
 
+        //
+        targetWidth /= 2;
+        targetHeight /= 2;
+    }
+
+    // Set up upsampling shader
+    mUpsampleProgram.useProgram();
+    glUniform1i(mUTextureLoc, 0);
+    glUniform2f(mUOffsetLoc, stepX, stepY);
+
+    // Upsample
+    for (auto i = 0; i < passes; i++) {
+        ATRACE_NAME("BlurFilter::renderUpsamplePass");
+        ALOGI("BLUR: upsample to %dx%d", targetWidth, targetHeight);
+        glViewport(0, 0, targetWidth, targetHeight);
+        draw->bind();
+
+        glBindTexture(GL_TEXTURE_2D, read->getTextureName());
+        glUniform2f(mUOffsetLoc, stepX, stepY);
+        glUniform2f(mUHalfPixelLoc, 0.5 / targetWidth, 0.5 / targetHeight);
+        drawMesh(mUUvLoc, mUPosLoc);
+
+        // Swap buffers for next iteration
+        auto tmp = draw;
+        draw = read;
+        read = tmp;
+
+        //
+        targetWidth *= 2;
+        targetHeight *= 2;
+    }
+
+    // Copysample
+    // We need to do this here because render runs the crossfading shader for its final step
+    //d
+    ALOGI("BLUR: final target dims %dx%d", targetWidth, targetHeight);
+
+    mLastDrawTarget = read;
     return NO_ERROR;
 }
 
@@ -220,28 +283,70 @@ string BlurFilter::getVertexShader() const {
     )SHADER";
 }
 
-string BlurFilter::getFragmentShader() const {
+string BlurFilter::getDownsampleFragShader() const {
     return R"SHADER(#version 310 es
         precision mediump float;
 
         uniform sampler2D uTexture;
         uniform vec2 uOffset;
+        uniform vec2 uHalfPixel;
 
         in highp vec2 vUV;
         out vec4 fragColor;
 
         void main() {
-            fragColor  = texture(uTexture, vUV, 0.0);
-            fragColor += texture(uTexture, vUV + vec2( uOffset.x,  uOffset.y), 0.0);
-            fragColor += texture(uTexture, vUV + vec2( uOffset.x, -uOffset.y), 0.0);
-            fragColor += texture(uTexture, vUV + vec2(-uOffset.x,  uOffset.y), 0.0);
-            fragColor += texture(uTexture, vUV + vec2(-uOffset.x, -uOffset.y), 0.0);
-
-            fragColor = vec4(fragColor.rgb * 0.2, 1.0);
+            vec4 sum = texture(uTexture, vUV) * 4.0;
+            sum += texture(uTexture, vUV - uHalfPixel.xy * uOffset);
+            sum += texture(uTexture, vUV + uHalfPixel.xy * uOffset);
+            sum += texture(uTexture, vUV + vec2(uHalfPixel.x, -uHalfPixel.y) * uOffset);
+            sum += texture(uTexture, vUV - vec2(uHalfPixel.x, -uHalfPixel.y) * uOffset);
+            fragColor = sum / 8.0;
         }
     )SHADER";
 }
 
+string BlurFilter::getUpsampleFragShader() const {
+    return R"SHADER(#version 310 es
+        precision mediump float;
+
+        uniform sampler2D uTexture;
+        uniform vec2 uOffset;
+        uniform vec2 uHalfPixel;
+
+        in highp vec2 vUV;
+        out vec4 fragColor;
+
+        void main() {
+            vec4 sum = texture(uTexture, vUV + vec2(-uHalfPixel.x * 2.0, 0.0));
+            sum += texture(uTexture, vUV + vec2(-uHalfPixel.x, uHalfPixel.y)) * 2.0;
+            sum += texture(uTexture, vUV + vec2(0.0, uHalfPixel.y * 2.0));
+            sum += texture(uTexture, vUV + vec2(uHalfPixel.x, uHalfPixel.y)) * 2.0;
+            sum += texture(uTexture, vUV + vec2(uHalfPixel.x * 2.0, 0.0));
+            sum += texture(uTexture, vUV + vec2(uHalfPixel.x, -uHalfPixel.y)) * 2.0;
+            sum += texture(uTexture, vUV + vec2(0.0, -uHalfPixel.y * 2.0));
+            sum += texture(uTexture, vUV + vec2(-uHalfPixel.x, -uHalfPixel.y)) * 2.0;
+            fragColor = sum / 12.0;
+        }
+    )SHADER";
+}
+/*
+string BlurFilter::getCopyFragShader() const {
+    return R"SHADER(#version 310 es
+        precision mediump float;
+
+        uniform sampler2D uTexture;
+        uniform vec2 uOffset;
+        uniform vec2 uHalfPixel;
+
+        in highp vec2 vUV;
+        out vec4 fragColor;
+
+        void main() {
+            fragColor = texture(uTexture, clamp(vUV, ))
+        }
+    )SHADER";
+}
+*/
 string BlurFilter::getMixFragShader() const {
     string shader = R"SHADER(#version 310 es
         precision mediump float;
