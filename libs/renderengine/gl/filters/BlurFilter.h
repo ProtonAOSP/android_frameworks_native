@@ -36,7 +36,7 @@ namespace gl {
 class BlurFilter {
 public:
     // Downsample FBO to improve performance
-    static constexpr float kFboScale = 0.2f;
+    static constexpr float kFboScale = 0.25f;
     // To avoid downscaling artifacts, we interpolate the blurred fbo with the full composited
     // image, up to this radius.
     static constexpr float kMaxCrossFadeRadius = 30.0f;
@@ -53,23 +53,27 @@ public:
 
 private:
     uint32_t mRadius;
+    uint32_t mPasses;
+    float mOffset;
+
     void drawMesh(GLuint uv, GLuint position);
     string getVertexShader() const;
-    string getFragmentShader() const;
+    string getDownsampleFragShader() const;
+    string getUpsampleFragShader() const;
     string getMixFragShader() const;
 
     GLESRenderEngine& mEngine;
     // Frame buffer holding the composited background.
     GLFramebuffer mCompositionFbo;
     // Frame buffers holding the blur passes.
-    GLFramebuffer mPingFbo;
-    GLFramebuffer mPongFbo;
+    std::vector<GLFramebuffer*> mPassFbos;
+    // Buffer holding the final blur pass.
+    GLFramebuffer* mLastDrawTarget;
+
     uint32_t mDisplayWidth = 0;
     uint32_t mDisplayHeight = 0;
     uint32_t mDisplayX = 0;
     uint32_t mDisplayY = 0;
-    // Buffer holding the final blur pass.
-    GLFramebuffer* mLastDrawTarget;
 
     // VBO containing vertex and uv data of a fullscreen triangle.
     GLVertexBuffer mMeshBuffer;
@@ -81,11 +85,19 @@ private:
     GLuint mMTextureLoc;
     GLuint mMCompositionTextureLoc;
 
-    GenericProgram mBlurProgram;
-    GLuint mBPosLoc;
-    GLuint mBUvLoc;
-    GLuint mBTextureLoc;
-    GLuint mBOffsetLoc;
+    GenericProgram mDownsampleProgram;
+    GLuint mDPosLoc;
+    GLuint mDUvLoc;
+    GLuint mDTextureLoc;
+    GLuint mDOffsetLoc;
+    GLuint mDHalfPixelLoc;
+
+    GenericProgram mUpsampleProgram;
+    GLuint mUPosLoc;
+    GLuint mUUvLoc;
+    GLuint mUTextureLoc;
+    GLuint mUOffsetLoc;
+    GLuint mUHalfPixelLoc;
 };
 
 } // namespace gl
