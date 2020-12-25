@@ -56,6 +56,7 @@ private:
     uint32_t mPasses;
     float mOffset;
 
+    void createVertexArray(GLuint* vertexArray, GLuint uv, GLuint position);
     void drawMesh(GLuint uv, GLuint position);
     string getVertexShader() const;
     string getDownsampleFragShader() const;
@@ -81,9 +82,10 @@ private:
     GenericProgram mMixProgram;
     GLuint mMPosLoc;
     GLuint mMUvLoc;
-    GLuint mMMixLoc;
+    GLuint mMBlurOpacityLoc;
     GLuint mMTextureLoc;
     GLuint mMCompositionTextureLoc;
+    GLuint mMVertexArray;
 
     GenericProgram mDownsampleProgram;
     GLuint mDPosLoc;
@@ -91,6 +93,7 @@ private:
     GLuint mDTextureLoc;
     GLuint mDOffsetLoc;
     GLuint mDHalfPixelLoc;
+    GLuint mDVertexArray;
 
     GenericProgram mUpsampleProgram;
     GLuint mUPosLoc;
@@ -98,6 +101,7 @@ private:
     GLuint mUTextureLoc;
     GLuint mUOffsetLoc;
     GLuint mUHalfPixelLoc;
+    GLuint mUVertexArray;
 };
 
 } // namespace gl
