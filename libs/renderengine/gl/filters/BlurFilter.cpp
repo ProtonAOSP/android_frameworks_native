@@ -79,12 +79,6 @@ BlurFilter::BlurFilter(GLESRenderEngine& engine)
 status_t BlurFilter::setAsDrawTarget(const DisplaySettings& display, uint32_t radius) {
     ATRACE_NAME("BlurFilter::setAsDrawTarget");
 
-    // Calculate passes and offsets here instead of propagating radius
-    ALOGI("SARU: ---------------------------------- new radius: %d", radius);
-    mRadius = radius;
-    mPasses = 3;
-    mOffset = 6.f;
-
     mDisplayX = display.physicalDisplay.left;
     mDisplayY = display.physicalDisplay.top;
 
@@ -135,6 +129,13 @@ status_t BlurFilter::setAsDrawTarget(const DisplaySettings& display, uint32_t ra
             return GL_INVALID_OPERATION;
         }
     }
+
+    // Calculate passes and offsets here instead of propagating radius
+    ALOGI("SARU: ---------------------------------- new radius: %d", radius);
+    mRadius = radius;
+    // FIXME
+    mPasses = 3; //ceil(mDisplayWidth / radius)
+    mOffset = 6.f;
 
     mCompositionFbo.bind();
     glViewport(0, 0, mCompositionFbo.getBufferWidth(), mCompositionFbo.getBufferHeight());
