@@ -87,7 +87,6 @@ private:
     GLuint mMBlurOpacityLoc;
     GLuint mMCompositionTextureLoc;
     GLuint mMBlurredTextureLoc;
-    GLuint mMDitherTextureLoc;
     GLuint mMVertexArray;
 
     GenericProgram mDownsampleProgram;
@@ -105,6 +104,8 @@ private:
     GLuint mUOffsetLoc;
     GLuint mUHalfPixelLoc;
     GLuint mUVertexArray;
+    GLuint mUDitherTextureLoc;
+    GLuint mUDitherLoc;
 };
 
 } // namespace gl
