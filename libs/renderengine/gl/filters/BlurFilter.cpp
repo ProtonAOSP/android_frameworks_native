@@ -97,6 +97,7 @@ status_t BlurFilter::setAsDrawTarget(const DisplaySettings& display, uint32_t ra
 
         if (mPassFbos.size() > 0) {
             for (auto fbo : mPassFbos) {
+                // FIXME: delete texture
                 delete fbo;
             }
         }
@@ -107,11 +108,13 @@ status_t BlurFilter::setAsDrawTarget(const DisplaySettings& display, uint32_t ra
         // FIXME
         // TODO: max passes for resolution
         allocPasses = 6;
-        for (int i = 0; i < allocPasses + 1; i++) {
+        for (auto i = 0; i < allocPasses + 1; i++) {
             // FIXME: memory leak on filter destroy
             GLFramebuffer* fbo = new GLFramebuffer(mEngine);
+
             ALOGI("SARU: alloc texture %dx%d", sourceFboWidth >> i, sourceFboHeight >> i);
             fbo->allocateBuffers(sourceFboWidth >> i, sourceFboHeight >> i);
+
             if (fbo->getStatus() != GL_FRAMEBUFFER_COMPLETE) {
                 ALOGE("Invalid pass buffer");
                 return fbo->getStatus();
@@ -135,7 +138,7 @@ status_t BlurFilter::setAsDrawTarget(const DisplaySettings& display, uint32_t ra
     mRadius = radius;
     // FIXME
     mPasses = 3; //ceil(mDisplayWidth / radius)
-    mOffset = 6.f;
+    mOffset = 3.25f;
 
     mCompositionFbo.bind();
     glViewport(0, 0, mCompositionFbo.getBufferWidth(), mCompositionFbo.getBufferHeight());
@@ -168,11 +171,6 @@ void BlurFilter::drawMesh(GLuint vertexArray) {
 status_t BlurFilter::prepare() {
     ATRACE_NAME("BlurFilter::prepare");
 
-    auto sourceWidth = mPassFbos[0]->getBufferWidth();
-    auto sourceHeight = mPassFbos[0]->getBufferHeight();
-    auto targetWidth = sourceWidth;
-    auto targetHeight = sourceHeight;
-
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, mCompositionFbo.getTextureName());
 
@@ -189,12 +187,6 @@ status_t BlurFilter::prepare() {
     for (auto i = 0; i < mPasses; i++) {
         ATRACE_NAME("BlurFilter::renderDownsamplePass");
 
-        targetWidth /= 2;
-        targetHeight /= 2;
-        glViewport(0, 0, targetWidth, targetHeight);
-
-        ALOGI("SARU: downsample to %dx%d", targetWidth, targetHeight);
-
         // Skip FBO 0 to avoid unnecessary blit
         draw = mPassFbos[i + 1];
         if (i == 0) {
@@ -202,6 +194,12 @@ status_t BlurFilter::prepare() {
         } else {
             read = mPassFbos[i];
         }
+
+        auto targetWidth = draw->getBufferWidth();
+        auto targetHeight = draw->getBufferHeight();
+        glViewport(0, 0, targetWidth, targetHeight);
+
+        ALOGI("SARU: downsample to %dx%d", targetWidth, targetHeight);
 
         glBindTexture(GL_TEXTURE_2D, read->getTextureName());
         draw->bind();
@@ -219,15 +217,15 @@ status_t BlurFilter::prepare() {
     for (auto i = 0; i < mPasses; i++) {
         ATRACE_NAME("BlurFilter::renderUpsamplePass");
 
-        targetWidth *= 2;
-        targetHeight *= 2;
-        glViewport(0, 0, targetWidth, targetHeight);
-
-        ALOGI("SARU: upsample to %dx%d", targetWidth, targetHeight);
-
         // Upsampling goes in the reverse direction
         read = mPassFbos[mPasses - i];
         draw = mPassFbos[mPasses - i - 1];
+
+        auto targetWidth = draw->getBufferWidth();
+        auto targetHeight = draw->getBufferHeight();
+        glViewport(0, 0, targetWidth, targetHeight);
+
+        ALOGI("SARU: upsample to %dx%d", targetWidth, targetHeight);
 
         glBindTexture(GL_TEXTURE_2D, read->getTextureName());
         draw->bind();
