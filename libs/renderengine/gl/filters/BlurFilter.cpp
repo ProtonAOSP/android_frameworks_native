@@ -17,7 +17,6 @@
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
 
 #include "BlurFilter.h"
-#include "BlurNoise.h"
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 #include <GLES3/gl3.h>
@@ -78,7 +77,17 @@ BlurFilter::BlurFilter(GLESRenderEngine& engine)
     mUHalfPixelLoc = mUpsampleProgram.getUniformLocation("uHalfPixel");
     createVertexArray(&mUVertexArray, mUPosLoc, mUUvLoc);
 
-    mDitherFbo.allocateBuffers(256, 256, (void *) kBlurNoisePattern,
+    const GLubyte bayerPattern[] = {
+          0, 128,  32, 160,   8, 136,  40, 168,
+        192,  64, 224,  96, 200,  72, 232, 104,
+         48, 176,  16, 144,  56, 184,  24, 152,
+        240, 112, 208,  80, 248, 120, 216,  88,
+         12, 140,  44, 172,   4, 132,  36, 164,
+        204,  76, 236, 108, 196,  68, 228, 100,
+         60, 188,  28, 156,  52, 180,  20, 148,
+        252, 124, 220,  92, 244, 116, 212,  84,
+    };
+    mDitherFbo.allocateBuffers(8, 8, (void *) bayerPattern,
                                GL_NEAREST, GL_REPEAT,
                                GL_R8, GL_RED);
 }
@@ -120,7 +129,9 @@ status_t BlurFilter::setAsDrawTarget(const DisplaySettings& display, uint32_t ra
             GLFramebuffer* fbo = new GLFramebuffer(mEngine);
 
             ALOGI("SARU: alloc texture %dx%d", sourceFboWidth >> i, sourceFboHeight >> i);
-            fbo->allocateBuffers(sourceFboWidth >> i, sourceFboHeight >> i, nullptr);
+            fbo->allocateBuffers(sourceFboWidth >> i, sourceFboHeight >> i, nullptr,
+                                 GL_LINEAR, GL_MIRRORED_REPEAT,
+                                 GL_RGB10_A2, GL_RGBA, GL_UNSIGNED_INT_2_10_10_10_REV);
 
             if (fbo->getStatus() != GL_FRAMEBUFFER_COMPLETE) {
                 ALOGE("Invalid pass buffer");
@@ -369,8 +380,8 @@ string BlurFilter::getMixFragShader() const {
 
         void main() {
             vec4 blurred = texture(uBlurredTexture, vUV);
-            float ditherLum = texture(uDitherTexture, gl_FragCoord.xy / 512.0).r;
-            float dither = ditherLum * 0.02;
+            float ditherLum = texture(uDitherTexture, gl_FragCoord.xy / 8.0).r;
+            float dither = ditherLum / 32.0 - (1.0 / 128.0);
             fragColor = blurred + dither;
         }
     )SHADER";
