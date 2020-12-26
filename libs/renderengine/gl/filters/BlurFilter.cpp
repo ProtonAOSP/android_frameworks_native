@@ -57,6 +57,7 @@ BlurFilter::BlurFilter(GLESRenderEngine& engine)
     mMUvLoc = mMixProgram.getAttributeLocation("aUV");
     mMCompositionTextureLoc = mMixProgram.getUniformLocation("uCompositionTexture");
     mMBlurredTextureLoc = mMixProgram.getUniformLocation("uBlurredTexture");
+    mMDitherTextureLoc = mMixProgram.getUniformLocation("uDitherTexture");
     mMBlurOpacityLoc = mMixProgram.getUniformLocation("uBlurOpacity");
     createVertexArray(&mMVertexArray, mMPosLoc, mMUvLoc);
 
@@ -74,8 +75,6 @@ BlurFilter::BlurFilter(GLESRenderEngine& engine)
     mUTextureLoc = mUpsampleProgram.getUniformLocation("uTexture");
     mUOffsetLoc = mUpsampleProgram.getUniformLocation("uOffset");
     mUHalfPixelLoc = mUpsampleProgram.getUniformLocation("uHalfPixel");
-    mUDitherTextureLoc = mUpsampleProgram.getUniformLocation("uDitherTexture");
-    mUDitherLoc = mUpsampleProgram.getUniformLocation("uDither");
     createVertexArray(&mUVertexArray, mUPosLoc, mUUvLoc);
 
     const GLubyte bayerPattern[] = {
@@ -130,13 +129,9 @@ status_t BlurFilter::setAsDrawTarget(const DisplaySettings& display, uint32_t ra
             GLFramebuffer* fbo = new GLFramebuffer(mEngine);
 
             ALOGI("SARU: alloc texture %dx%d", sourceFboWidth >> i, sourceFboHeight >> i);
-            if (i == 0) {
-                fbo->allocateBuffers(sourceFboWidth >> i, sourceFboHeight >> i, nullptr);
-            } else {
-                fbo->allocateBuffers(sourceFboWidth >> i, sourceFboHeight >> i, nullptr,
-                                     GL_LINEAR, GL_MIRRORED_REPEAT,
-                                     GL_RGBA32F, GL_RGBA, GL_FLOAT);
-            }
+            fbo->allocateBuffers(sourceFboWidth >> i, sourceFboHeight >> i, nullptr,
+                                 GL_LINEAR, GL_MIRRORED_REPEAT,
+                                 GL_RGBA32F, GL_RGBA, GL_FLOAT);
 
             if (fbo->getStatus() != GL_FRAMEBUFFER_COMPLETE) {
                 ALOGE("Invalid pass buffer");
@@ -236,12 +231,6 @@ status_t BlurFilter::prepare() {
     mUpsampleProgram.useProgram();
     glUniform1i(mUTextureLoc, 0);
 
-    glActiveTexture(GL_TEXTURE1);
-    glBindTexture(GL_TEXTURE_2D, mDitherFbo.getTextureName());
-    glUniform1i(mUDitherTextureLoc, 1);
-    glUniform1i(mUDitherLoc, 0);
-    glActiveTexture(GL_TEXTURE0);
-
     // Upsample
     for (auto i = 0; i < mPasses; i++) {
         ATRACE_NAME("BlurFilter::renderUpsamplePass");
@@ -261,11 +250,6 @@ status_t BlurFilter::prepare() {
 
         glUniform1f(mUOffsetLoc, mOffset);
         glUniform2f(mUHalfPixelLoc, 0.5 / targetWidth, 0.5 / targetHeight);
-        if (i == mPasses - 1) {
-            glUniform1i(mUDitherLoc, 1);
-        } else {
-            glUniform1i(mUDitherLoc, 0);
-        }
         drawMesh(mUVertexArray);
     }
 
@@ -302,6 +286,10 @@ status_t BlurFilter::render(bool /*multiPass*/) {
     glActiveTexture(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_2D, mLastDrawTarget->getTextureName());
     glUniform1i(mMBlurredTextureLoc, 1);
+
+    glActiveTexture(GL_TEXTURE2);
+    glBindTexture(GL_TEXTURE_2D, mDitherFbo.getTextureName());
+    glUniform1i(mMDitherTextureLoc, 2);
 
     drawMesh(mMVertexArray);
 
@@ -357,10 +345,8 @@ string BlurFilter::getUpsampleFragShader() const {
         precision mediump float;
 
         uniform sampler2D uTexture;
-        uniform sampler2D uDitherTexture;
         uniform float uOffset;
         uniform vec2 uHalfPixel;
-        uniform bool uDither;
 
         in highp vec2 vUV;
         out vec4 fragColor;
@@ -375,12 +361,6 @@ string BlurFilter::getUpsampleFragShader() const {
             sum += texture(uTexture, vUV + vec2(0.0, -uHalfPixel.y * 2.0) * uOffset);
             sum += texture(uTexture, vUV + vec2(-uHalfPixel.x, -uHalfPixel.y) * uOffset) * 2.0;
             fragColor = sum / 12.0;
-
-            if (uDither) {
-                float ditherLum = texture(uDitherTexture, gl_FragCoord.xy / 8.0).r;
-                float dither = ditherLum / 32.0 - (1.0 / 128.0);
-                fragColor += dither;
-            }
         }
     )SHADER";
 }
@@ -392,6 +372,7 @@ string BlurFilter::getMixFragShader() const {
 
         uniform sampler2D uCompositionTexture;
         uniform sampler2D uBlurredTexture;
+        uniform sampler2D uDitherTexture;
         uniform float uBlurOpacity;
 
         in highp vec2 vUV;
@@ -399,7 +380,9 @@ string BlurFilter::getMixFragShader() const {
 
         void main() {
             vec4 blurred = texture(uBlurredTexture, vUV);
-            fragColor = blurred;
+            float ditherLum = texture(uDitherTexture, gl_FragCoord.xy / 8.0).r;
+            float dither = ditherLum / 32.0 - (1.0 / 128.0);
+            fragColor = blurred + dither;
         }
     )SHADER";
 }
