@@ -29,9 +29,8 @@ namespace renderengine {
 namespace gl {
 
 /**
- * This is an implementation of a Kawase blur, as described in here:
- * https://community.arm.com/cfs-file/__key/communityserver-blogs-components-weblogfiles/
- * 00-00-00-20-66/siggraph2015_2D00_mmg_2D00_marius_2D00_notes.pdf
+ * This is an implementation of dual-filtered Kawase blur, as described in here:
+ * https://community.arm.com/cfs-file/__key/communityserver-blogs-components-weblogfiles/00-00-00-20-66/siggraph2015_2D00_mmg_2D00_marius_2D00_notes.pdf
  */
 class BlurFilter {
 public:

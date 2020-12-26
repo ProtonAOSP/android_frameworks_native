@@ -89,7 +89,7 @@ BlurFilter::BlurFilter(GLESRenderEngine& engine)
     };
     mDitherFbo.allocateBuffers(8, 8, (void *) bayerPattern,
                                GL_NEAREST, GL_REPEAT,
-                               GL_RED, GL_RED);
+                               GL_R8, GL_RED);
 }
 
 status_t BlurFilter::setAsDrawTarget(const DisplaySettings& display, uint32_t radius) {
@@ -131,7 +131,7 @@ status_t BlurFilter::setAsDrawTarget(const DisplaySettings& display, uint32_t ra
             ALOGI("SARU: alloc texture %dx%d", sourceFboWidth >> i, sourceFboHeight >> i);
             fbo->allocateBuffers(sourceFboWidth >> i, sourceFboHeight >> i, nullptr,
                                  GL_LINEAR, GL_MIRRORED_REPEAT,
-                                 GL_RGB10_A2, GL_RGBA, GL_UNSIGNED_INT_2_10_10_10_REV);
+                                 GL_RGBA32F, GL_RGBA, GL_FLOAT);
 
             if (fbo->getStatus() != GL_FRAMEBUFFER_COMPLETE) {
                 ALOGE("Invalid pass buffer");
