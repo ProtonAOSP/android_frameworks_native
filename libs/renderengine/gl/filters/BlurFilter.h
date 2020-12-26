@@ -67,6 +67,8 @@ private:
     GLESRenderEngine& mEngine;
     // Frame buffer holding the composited background.
     GLFramebuffer mCompositionFbo;
+    // Frame buffer holding the Bayer dithering matrix.
+    GLFramebuffer mDitherFbo;
     // Frame buffers holding the blur passes.
     std::vector<GLFramebuffer*> mPassFbos;
     // Buffer holding the final blur pass.
@@ -84,8 +86,9 @@ private:
     GLuint mMPosLoc;
     GLuint mMUvLoc;
     GLuint mMBlurOpacityLoc;
-    GLuint mMTextureLoc;
     GLuint mMCompositionTextureLoc;
+    GLuint mMBlurredTextureLoc;
+    GLuint mMDitherTextureLoc;
     GLuint mMVertexArray;
 
     GenericProgram mDownsampleProgram;
