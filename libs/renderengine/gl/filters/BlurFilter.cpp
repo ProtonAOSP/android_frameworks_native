@@ -131,7 +131,7 @@ status_t BlurFilter::setAsDrawTarget(const DisplaySettings& display, uint32_t ra
             ALOGI("SARU: alloc texture %dx%d", sourceFboWidth >> i, sourceFboHeight >> i);
             fbo->allocateBuffers(sourceFboWidth >> i, sourceFboHeight >> i, nullptr,
                                  GL_LINEAR, GL_MIRRORED_REPEAT,
-                                 GL_RGBA32F, GL_RGBA, GL_FLOAT);
+                                 GL_RGB10_A2, GL_RGBA, GL_UNSIGNED_INT_2_10_10_10_REV);
 
             if (fbo->getStatus() != GL_FRAMEBUFFER_COMPLETE) {
                 ALOGE("Invalid pass buffer");
