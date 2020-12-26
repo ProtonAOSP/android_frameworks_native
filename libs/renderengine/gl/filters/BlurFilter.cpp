@@ -77,18 +77,19 @@ BlurFilter::BlurFilter(GLESRenderEngine& engine)
     mUHalfPixelLoc = mUpsampleProgram.getUniformLocation("uHalfPixel");
     createVertexArray(&mUVertexArray, mUPosLoc, mUUvLoc);
 
-    const char bayerPattern[] = {
-         0, 32,  8, 40,  2, 34, 10, 42,
-        48, 16, 56, 24, 50, 18, 58, 26,
-        12, 44,  4, 36, 14, 46,  6, 38,
-        60, 28, 52, 20, 62, 30, 54, 22,
-         3, 35, 11, 43,  1, 33,  9, 41,
-        51, 19, 59, 27, 49, 17, 57, 25,
-        15, 47,  7, 39, 13, 45,  5, 37,
-        63, 31, 55, 23, 61, 29, 53, 21,
+    const GLubyte bayerPattern[] = {
+          0, 128,  32, 160,   8, 136,  40, 168,
+        192,  64, 224,  96, 200,  72, 232, 104,
+         48, 176,  16, 144,  56, 184,  24, 152,
+        240, 112, 208,  80, 248, 120, 216,  88,
+         12, 140,  44, 172,   4, 132,  36, 164,
+        204,  76, 236, 108, 196,  68, 228, 100,
+         60, 188,  28, 156,  52, 180,  20, 148,
+        252, 124, 220,  92, 244, 116, 212,  84,
     };
-
-    mDitherFbo.allocateBuffers(8, 8, (void *) bayerPattern, GL_NEAREST, GL_REPEAT, GL_RED, GL_RED);
+    mDitherFbo.allocateBuffers(8, 8, (void *) bayerPattern,
+                               GL_NEAREST, GL_REPEAT,
+                               GL_RED, GL_RED);
 }
 
 status_t BlurFilter::setAsDrawTarget(const DisplaySettings& display, uint32_t radius) {
@@ -128,7 +129,9 @@ status_t BlurFilter::setAsDrawTarget(const DisplaySettings& display, uint32_t ra
             GLFramebuffer* fbo = new GLFramebuffer(mEngine);
 
             ALOGI("SARU: alloc texture %dx%d", sourceFboWidth >> i, sourceFboHeight >> i);
-            fbo->allocateBuffers(sourceFboWidth >> i, sourceFboHeight >> i, nullptr, GL_LINEAR, GL_MIRRORED_REPEAT, GL_RGB10_A2, GL_RGBA, GL_UNSIGNED_INT_2_10_10_10_REV);
+            fbo->allocateBuffers(sourceFboWidth >> i, sourceFboHeight >> i, nullptr,
+                                 GL_LINEAR, GL_MIRRORED_REPEAT,
+                                 GL_RGB10_A2, GL_RGBA, GL_UNSIGNED_INT_2_10_10_10_REV);
 
             if (fbo->getStatus() != GL_FRAMEBUFFER_COMPLETE) {
                 ALOGE("Invalid pass buffer");
@@ -254,7 +257,7 @@ status_t BlurFilter::prepare() {
     return NO_ERROR;
 }
 
-status_t BlurFilter::render(bool multiPass) {
+status_t BlurFilter::render(bool /*multiPass*/) {
     ATRACE_NAME("BlurFilter::render");
 
     // Now let's scale our blur up. It will be interpolated with the larger composited
@@ -264,13 +267,13 @@ status_t BlurFilter::render(bool multiPass) {
     // When doing multiple passes, we cannot try to read mCompositionFbo, given that we'll
     // be writing onto it. Let's disable the crossfade, otherwise we'd need 1 extra frame buffer,
     // as large as the screen size.
-    if (opacity >= 1 || multiPass) {
-        mLastDrawTarget->bindAsReadBuffer();
-        glBlitFramebuffer(0, 0, mLastDrawTarget->getBufferWidth(),
-                          mLastDrawTarget->getBufferHeight(), mDisplayX, mDisplayY, mDisplayWidth,
-                          mDisplayHeight, GL_COLOR_BUFFER_BIT, GL_LINEAR);
-        return NO_ERROR;
-    }
+    //if (opacity >= 1 || multiPass) {
+    //    mLastDrawTarget->bindAsReadBuffer();
+    //    glBlitFramebuffer(0, 0, mLastDrawTarget->getBufferWidth(),
+    //                      mLastDrawTarget->getBufferHeight(), mDisplayX, mDisplayY, mDisplayWidth,
+    //                      mDisplayHeight, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+    //    return NO_ERROR;
+    //}
 
     // Crossfade using mix shader
     mMixProgram.useProgram();
@@ -377,7 +380,8 @@ string BlurFilter::getMixFragShader() const {
 
         void main() {
             vec4 blurred = texture(uBlurredTexture, vUV);
-            vec4 dither = vec4(texture(uDitherTexture, gl_FragCoord.xy / 8.0).r / 32.0 - (1.0 / 128.0));
+            float ditherLum = texture(uDitherTexture, gl_FragCoord.xy / 8.0).r;
+            float dither = ditherLum / 32.0 - (1.0 / 128.0);
             fragColor = blurred + dither;
         }
     )SHADER";
