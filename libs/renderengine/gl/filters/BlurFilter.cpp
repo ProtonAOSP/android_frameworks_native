@@ -86,14 +86,14 @@ BlurFilter::BlurFilter(GLESRenderEngine& engine)
     createVertexArray(&mUVertexArray, mUPosLoc, mUUvLoc);
 
     const GLubyte bayerPattern[] = {
-          0, 128,  32, 160,   8, 136,  40, 168,
-        192,  64, 224,  96, 200,  72, 232, 104,
-         48, 176,  16, 144,  56, 184,  24, 152,
-        240, 112, 208,  80, 248, 120, 216,  88,
-         12, 140,  44, 172,   4, 132,  36, 164,
-        204,  76, 236, 108, 196,  68, 228, 100,
-         60, 188,  28, 156,  52, 180,  20, 148,
-        252, 124, 220,  92, 244, 116, 212,  84,
+         0, 48, 12, 60,  3, 51, 15, 63,
+        32, 16, 44, 28, 35, 19, 47, 31,
+         8, 56,  4, 52, 11, 59,  7, 55,
+        40, 24, 36, 20, 43, 27, 39, 23,
+         2, 50, 14, 62,  1, 49, 13, 61,
+        34, 18, 46, 30, 33, 17, 45, 29,
+        10, 58,  6, 54,  9, 57,  5, 53,
+        42, 26, 38, 22, 41, 25, 37, 21,
     };
     mDitherFbo.allocateBuffers(8, 8, (void *) bayerPattern,
                                GL_NEAREST, GL_REPEAT,
@@ -410,8 +410,11 @@ string BlurFilter::getMixFragShader() const {
             vec4 blurred = texture(uBlurredTexture, vUV);
             vec4 composition = texture(uCompositionTexture, vUV);
 
-            float ditherLum = texture(uDitherTexture, gl_FragCoord.xy / 8.0).r;
-            float dither = ditherLum / 32.0 - (1.0 / 128.0);
+            /*
+             * This is supposed to be 1/64, but 1/32 looks better with notification
+             * shade dimming. 1/64 still results in a lot of banding.
+             */
+            float dither = texture(uDitherTexture, gl_FragCoord.xy / 8.0).r / 32.0;
             blurred += dither;
 
             fragColor = mix(composition, blurred, uBlurOpacity);
