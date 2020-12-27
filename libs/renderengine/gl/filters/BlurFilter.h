@@ -35,10 +35,11 @@ namespace gl {
 class BlurFilter {
 public:
     // Downsample FBO to improve performance
-    static constexpr float kFboScale = 0.2f;
+    static constexpr float kFboScale = 0.35f;
+    static constexpr uint32_t kMaxPasses = 5;
     // To avoid downscaling artifacts, we interpolate the blurred fbo with the full composited
     // image, up to this radius.
-    static constexpr float kMaxCrossFadeRadius = 30.0f;
+    static constexpr float kMaxCrossFadeRadius = 40.0f;
     // We allocate space for 
 
     explicit BlurFilter(GLESRenderEngine& engine);
@@ -56,6 +57,7 @@ private:
     uint32_t mPasses;
     float mOffset;
 
+    std::tuple<int32_t, float> convertGaussianRadius(uint32_t radius);
     void createVertexArray(GLuint* vertexArray, GLuint position, GLuint uv);
     void drawMesh(GLuint vertexArray);
     string getVertexShader() const;

@@ -30,6 +30,14 @@ namespace android {
 namespace renderengine {
 namespace gl {
 
+static const std::vector<std::tuple<float, float>> kOffsetRanges = {
+    {1.00, 2.50}, // pass 1
+    {1.00, 3.00}, // pass 2
+    {1.50, 11.25}, // pass 3
+    {1.75, 18.00}, // pass 4
+    {2.00, 20.00}, // pass 5
+};
+
 BlurFilter::BlurFilter(GLESRenderEngine& engine)
       : mEngine(engine),
         mCompositionFbo(engine),
@@ -123,7 +131,7 @@ status_t BlurFilter::setAsDrawTarget(const DisplaySettings& display, uint32_t ra
         uint32_t allocPasses = mPasses;
         // FIXME
         // TODO: max passes for resolution
-        allocPasses = 6;
+        allocPasses = 5;
         for (auto i = 0; i < allocPasses + 1; i++) {
             // FIXME: memory leak on filter destroy
             GLFramebuffer* fbo = new GLFramebuffer(mEngine);
@@ -153,15 +161,32 @@ status_t BlurFilter::setAsDrawTarget(const DisplaySettings& display, uint32_t ra
 
     // Approximate Gaussian blur radius
     mRadius = radius;
-    // FIXME
-    const uint32_t fboWidth = floorf(mDisplayWidth * kFboScale);
-    mPasses = (uint32_t) ceil(std::sqrt(radius) / 5.0f);
-    mOffset = ((float) fboWidth) / ((float) mPasses * (float) mPasses) / 7.5f;
-    ALOGI("SARU: ---------------------------------- new radius: %d  : passes=%d offset=%f", radius, mPasses, mOffset);
+    auto [passes, offset] = convertGaussianRadius(radius);
+    ALOGI("SARU: ---------------------------------- new radius: %d  : passes=%d offset=%f", radius, passes, offset);
+    if (passes == -1) {
+        return BAD_VALUE;
+    }
+    mPasses = passes;
+    mOffset = offset;
+
+    mPasses = 3;
+    mOffset = 3.25f;
 
     mCompositionFbo.bind();
     glViewport(0, 0, mCompositionFbo.getBufferWidth(), mCompositionFbo.getBufferHeight());
     return NO_ERROR;
+}
+
+std::tuple<int32_t, float> BlurFilter::convertGaussianRadius(uint32_t radius) {
+    for (auto i = 0; i < kMaxPasses; i++) {
+        auto [minOffset, maxOffset] = kOffsetRanges[i];
+        float offset = radius * kFboScale / std::pow(2, i + 1);
+        if (offset >= minOffset && offset <= maxOffset) {
+            return {i + 1, offset};
+        }
+    }
+
+    return {1, radius * kFboScale / std::pow(2, 1)};
 }
 
 void BlurFilter::createVertexArray(GLuint* vertexArray, GLuint position, GLuint uv) {
@@ -198,6 +223,7 @@ status_t BlurFilter::prepare() {
     // Set up downsampling shader
     mDownsampleProgram.useProgram();
     glUniform1i(mDTextureLoc, 0);
+    glUniform1f(mDOffsetLoc, mOffset);
 
     GLFramebuffer* read;
     GLFramebuffer* draw;
@@ -223,7 +249,7 @@ status_t BlurFilter::prepare() {
         glBindTexture(GL_TEXTURE_2D, read->getTextureName());
         draw->bind();
 
-        glUniform1f(mDOffsetLoc, mOffset);
+        // 1/2 pixel size in NDC
         glUniform2f(mDHalfPixelLoc, 0.5 / targetWidth, 0.5 / targetHeight);
         drawMesh(mDVertexArray);
     }
@@ -231,6 +257,7 @@ status_t BlurFilter::prepare() {
     // Set up upsampling shader
     mUpsampleProgram.useProgram();
     glUniform1i(mUTextureLoc, 0);
+    glUniform1f(mUOffsetLoc, mOffset);
 
     // Upsample
     for (auto i = 0; i < mPasses; i++) {
@@ -249,7 +276,6 @@ status_t BlurFilter::prepare() {
         glBindTexture(GL_TEXTURE_2D, read->getTextureName());
         draw->bind();
 
-        glUniform1f(mUOffsetLoc, mOffset);
         // 1/2 pixel size in NDC
         glUniform2f(mUHalfPixelLoc, 0.5 / targetWidth, 0.5 / targetHeight);
         drawMesh(mUVertexArray);
