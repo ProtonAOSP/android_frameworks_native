@@ -151,12 +151,13 @@ status_t BlurFilter::setAsDrawTarget(const DisplaySettings& display, uint32_t ra
         }
     }
 
-    // Calculate passes and offsets here instead of propagating radius
-    ALOGI("SARU: ---------------------------------- new radius: %d", radius);
+    // Approximate Gaussian blur radius
     mRadius = radius;
     // FIXME
-    mPasses = 3; //ceil(mDisplayWidth / radius)
-    mOffset = 3.25f;
+    const uint32_t fboWidth = floorf(mDisplayWidth * kFboScale);
+    mPasses = (uint32_t) ceil(std::sqrt(radius) / 5.0f);
+    mOffset = ((float) fboWidth) / ((float) mPasses * (float) mPasses) / 7.5f;
+    ALOGI("SARU: ---------------------------------- new radius: %d  : passes=%d offset=%f", radius, mPasses, mOffset);
 
     mCompositionFbo.bind();
     glViewport(0, 0, mCompositionFbo.getBufferWidth(), mCompositionFbo.getBufferHeight());
@@ -249,6 +250,7 @@ status_t BlurFilter::prepare() {
         draw->bind();
 
         glUniform1f(mUOffsetLoc, mOffset);
+        // 1/2 pixel size in NDC
         glUniform2f(mUHalfPixelLoc, 0.5 / targetWidth, 0.5 / targetHeight);
         drawMesh(mUVertexArray);
     }
