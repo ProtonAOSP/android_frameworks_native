@@ -417,10 +417,6 @@ string BlurFilter::getMixFragShader() const {
             vec4 blurred = texture(uBlurredTexture, vUV);
             vec4 composition = texture(uCompositionTexture, vUV);
 
-            /*
-             * This is supposed to be 1/64, but 1/32 looks better with notification
-             * shade dimming. 1/64 still results in a lot of banding.
-             */
             vec3 dither = texture(uDitherTexture, gl_FragCoord.xy / 16.0).rgb / 64.0;
             blurred = vec4(blurred.rgb + dither, 1.0);
 
