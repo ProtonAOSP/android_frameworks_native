@@ -72,7 +72,7 @@ BlurFilter::BlurFilter(GLESRenderEngine& engine)
 
     mDitherFbo.allocateBuffers(64, 64, (void *) kBlurNoisePattern,
                                GL_NEAREST, GL_REPEAT,
-                               GL_RGB, GL_RGB);
+                               GL_RGB, GL_RGB, GL_UNSIGNED_BYTE);
 }
 
 void BlurFilter::createVertexArray(GLuint* vertexArray, GLuint position, GLuint uv) {
@@ -120,6 +120,7 @@ status_t BlurFilter::prepareBuffers(const DisplaySettings& display) {
 
         fbo->allocateBuffers(sourceFboWidth >> i, sourceFboHeight >> i, nullptr,
                                 GL_LINEAR, GL_MIRRORED_REPEAT,
+                                // 2-10-10-10 reversed is the only 10-bpc format in GLES 3.1
                                 GL_RGB10_A2, GL_RGBA, GL_UNSIGNED_INT_2_10_10_10_REV);
         if (fbo->getStatus() != GL_FRAMEBUFFER_COMPLETE) {
             ALOGE("Invalid pass buffer");
@@ -205,7 +206,8 @@ void BlurFilter::renderPass(GLFramebuffer* read, GLFramebuffer* draw) {
     glBindTexture(GL_TEXTURE_2D, read->getTextureName());
     draw->bind();
 
-    // 1/2 pixel size in NDC
+    // 1/2 pixel offset in texture coordinate (UV) space
+    // Note that this is different from NDC!
     glUniform2f(2, 0.5 / targetWidth, 0.5 / targetHeight);
     drawMesh();
 }
@@ -393,6 +395,8 @@ string BlurFilter::getMixFragShader() const {
             vec4 blurred = texture(uBlurredTexture, vUV);
             vec4 composition = texture(uCompositionTexture, vUV);
 
+            // First /64: screen coordinates -> texture coordinates (UV)
+            // Second /64: reduce magnitude to make it a dither instead of an overlay (from Bayer 8x8)
             vec3 dither = texture(uDitherTexture, gl_FragCoord.xy / 64.0).rgb / 64.0;
             blurred = vec4(blurred.rgb + dither, 1.0);
 
