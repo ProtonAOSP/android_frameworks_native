@@ -75,7 +75,7 @@ private:
     // Frame buffer holding the Bayer dithering matrix.
     GLFramebuffer mDitherFbo;
     // Frame buffers holding the blur passes. (one extra for final upsample to source FBO size)
-    std::vector<GLFramebuffer> mPassFbos;
+    std::vector<GLFramebuffer*> mPassFbos;
     // Buffer holding the final blur pass.
     GLFramebuffer* mLastDrawTarget;
 

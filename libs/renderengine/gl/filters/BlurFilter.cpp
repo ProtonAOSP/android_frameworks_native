@@ -111,7 +111,7 @@ status_t BlurFilter::prepareBuffers(const DisplaySettings& display) {
     if (mPassFbos.size() == 0) {
         mPassFbos.reserve(kMaxPasses + 1);
         for (auto i = 0; i < kMaxPasses + 1; i++) {
-            mPassFbos.push_back(GLFramebuffer(mEngine));
+            mPassFbos.push_back(new GLFramebuffer(mEngine));
         }
     }
 
@@ -119,7 +119,7 @@ status_t BlurFilter::prepareBuffers(const DisplaySettings& display) {
     const uint32_t sourceFboWidth = floorf(mDisplayWidth * kFboScale);
     const uint32_t sourceFboHeight = floorf(mDisplayHeight * kFboScale);
     for (auto i = 0; i < kMaxPasses + 1; i++) {
-        GLFramebuffer* fbo = &mPassFbos[i];
+        GLFramebuffer* fbo = mPassFbos[i];
 
         fbo->allocateBuffers(sourceFboWidth >> i, sourceFboHeight >> i, nullptr,
                                 GL_LINEAR, GL_MIRRORED_REPEAT,
@@ -236,7 +236,7 @@ status_t BlurFilter::prepare() {
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, mCompositionFbo.getTextureName());
 
-    ALOGI("SARU: prepare - initial dims %dx%d", mPassFbos[0].getBufferWidth(), mPassFbos[0].getBufferHeight());
+    ALOGI("SARU: prepare - initial dims %dx%d", mPassFbos[0]->getBufferWidth(), mPassFbos[0]->getBufferHeight());
 
     // Set up downsampling shader
     mDownsampleProgram.useProgram();
@@ -251,8 +251,8 @@ status_t BlurFilter::prepare() {
         ATRACE_NAME("BlurFilter::renderDownsamplePass");
 
         // Skip FBO 0 to avoid unnecessary blit
-        read = (i == 0) ? &mCompositionFbo : &mPassFbos[i];
-        draw = &mPassFbos[i + 1];
+        read = (i == 0) ? &mCompositionFbo : mPassFbos[i];
+        draw = mPassFbos[i + 1];
 
         renderPass(read, draw, mDHalfPixelLoc, mDVertexArray);
     }
@@ -267,8 +267,8 @@ status_t BlurFilter::prepare() {
         ATRACE_NAME("BlurFilter::renderUpsamplePass");
 
         // Upsampling uses buffers in the reverse direction
-        read = &mPassFbos[mPasses - i];
-        draw = &mPassFbos[mPasses - i - 1];
+        read = mPassFbos[mPasses - i];
+        draw = mPassFbos[mPasses - i - 1];
 
         renderPass(read, draw, mUHalfPixelLoc, mUVertexArray);
     }
