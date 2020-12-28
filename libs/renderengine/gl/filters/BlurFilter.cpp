@@ -98,7 +98,7 @@ BlurFilter::BlurFilter(GLESRenderEngine& engine)
 status_t BlurFilter::prepareBuffers(const DisplaySettings& display) {
     ATRACE_NAME("BlurFilter::prepareBuffers");
 
-    // This is the source FBO, used for blurring and crossfading at full resolution.
+    // Source FBO, used for blurring and crossfading at full resolution
     mDisplayWidth = display.physicalDisplay.width();
     mDisplayHeight = display.physicalDisplay.height();
     mCompositionFbo.allocateBuffers(mDisplayWidth, mDisplayHeight);
