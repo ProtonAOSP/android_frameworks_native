@@ -27,12 +27,16 @@
 
 #include <utils/Trace.h>
 
+// Minimum and maximum sampling offsets for each pass count, determined empirically.
+// Too low: bilinear downsampling artifacts
+// Too high: diagonal sampling artifacts
 static const std::vector<std::tuple<float, float>> kOffsetRanges = {
-    {1.00, 2.50}, // pass 1
-    {1.00, 3.00}, // pass 2
+    {1.00,  2.50}, // pass 1
+    {1.00,  3.00}, // pass 2
     {1.50, 11.25}, // pass 3
     {1.75, 18.00}, // pass 4
     {2.00, 20.00}, // pass 5
+    /* limited by kMaxPasses */
 };
 
 namespace android {
@@ -49,6 +53,7 @@ BlurFilter::BlurFilter(GLESRenderEngine& engine)
     // Create VBO first for usage in shader VAOs
     static constexpr auto size = 2.0f;
     static constexpr auto translation = 1.0f;
+    // This represents the rectangular display with a single oversized triangle.
     const GLfloat vboData[] = {
         // Vertex data
         translation - size, -translation - size,
@@ -86,8 +91,61 @@ BlurFilter::BlurFilter(GLESRenderEngine& engine)
     mUHalfPixelLoc = mUpsampleProgram.getUniformLocation("uHalfPixel");
     createVertexArray(&mUVertexArray, mUPosLoc, mUUvLoc);
 
-    mDitherFbo.allocateBuffers(64, 64, (void *) kBlurNoiseMatrix,
+    mDitherFbo.allocateBuffers(64, 64, (void *) kBlurNoisePattern,
                                GL_NEAREST, GL_REPEAT);
+}
+
+status_t BlurFilter::prepareBuffers(const DisplaySettings& display) {
+    ATRACE_NAME("BlurFilter::prepareBuffers");
+
+    // This is the source FBO, used for blurring and crossfading at full resolution.
+    mDisplayWidth = display.physicalDisplay.width();
+    mDisplayHeight = display.physicalDisplay.height();
+    mCompositionFbo.allocateBuffers(mDisplayWidth, mDisplayHeight);
+    if (mCompositionFbo.getStatus() != GL_FRAMEBUFFER_COMPLETE) {
+        ALOGE("Invalid composition buffer");
+        return mCompositionFbo.getStatus();
+    }
+
+    // Only allocate FBO wrapper objects once
+    if (mPassFbos.size() == 0) {
+        mPassFbos.reserve(kMaxPasses + 1);
+        for (auto i = 0; i < kMaxPasses + 1; i++) {
+            mPassFbos.push_back(GLFramebuffer(mEngine));
+        }
+    }
+
+    // Allocate FBOs for blur passes, using downscaled display size
+    const uint32_t sourceFboWidth = floorf(mDisplayWidth * kFboScale);
+    const uint32_t sourceFboHeight = floorf(mDisplayHeight * kFboScale);
+    for (auto i = 0; i < kMaxPasses + 1; i++) {
+        GLFramebuffer* fbo = &mPassFbos[i];
+
+        fbo->allocateBuffers(sourceFboWidth >> i, sourceFboHeight >> i, nullptr,
+                                GL_LINEAR, GL_MIRRORED_REPEAT,
+                                GL_RGB10_A2, GL_RGBA, GL_UNSIGNED_INT_2_10_10_10_REV);
+        if (fbo->getStatus() != GL_FRAMEBUFFER_COMPLETE) {
+            ALOGE("Invalid pass buffer");
+            return fbo->getStatus();
+        }
+    }
+
+    // Creating a BlurFilter doesn't necessarily mean that it will be used, so we
+    // only check for successful shader compiles here.
+    if (!mMixProgram.isValid()) {
+        ALOGE("Invalid mix shader");
+        return GL_INVALID_OPERATION;
+    }
+    if (!mDownsampleProgram.isValid()) {
+        ALOGE("Invalid downsample shader");
+        return GL_INVALID_OPERATION;
+    }
+    if (!mUpsampleProgram.isValid()) {
+        ALOGE("Invalid upsample shader");
+        return GL_INVALID_OPERATION;
+    }
+
+    return NO_ERROR;
 }
 
 status_t BlurFilter::setAsDrawTarget(const DisplaySettings& display, uint32_t radius) {
@@ -96,71 +154,24 @@ status_t BlurFilter::setAsDrawTarget(const DisplaySettings& display, uint32_t ra
     mDisplayX = display.physicalDisplay.left;
     mDisplayY = display.physicalDisplay.top;
 
+    // Allocating FBOs is expensive, so only reallocate for larger displays.
+    // Smaller displays will still work using oversized buffers.
     if (mDisplayWidth < display.physicalDisplay.width() ||
-        mDisplayHeight < display.physicalDisplay.height()) {
-        ATRACE_NAME("BlurFilter::allocatingTextures");
-        ALOGI("SARU: ----------------------------------------------------- NEW FILTER TARGET, alloc textures");
-
-        mDisplayWidth = display.physicalDisplay.width();
-        mDisplayHeight = display.physicalDisplay.height();
-        mCompositionFbo.allocateBuffers(mDisplayWidth, mDisplayHeight);
-        if (mCompositionFbo.getStatus() != GL_FRAMEBUFFER_COMPLETE) {
-            ALOGE("Invalid composition buffer");
-            return mCompositionFbo.getStatus();
-        }
-
-        if (mPassFbos.size() > 0) {
-            for (auto fbo : mPassFbos) {
-                // FIXME: delete texture
-                delete fbo;
-            }
-        }
-
-        const uint32_t sourceFboWidth = floorf(mDisplayWidth * kFboScale);
-        const uint32_t sourceFboHeight = floorf(mDisplayHeight * kFboScale);
-        uint32_t allocPasses = mPasses;
-        // FIXME
-        // TODO: max passes for resolution
-        allocPasses = 5;
-        for (auto i = 0; i < allocPasses + 1; i++) {
-            // FIXME: memory leak on filter destroy
-            GLFramebuffer* fbo = new GLFramebuffer(mEngine);
-
-            ALOGI("SARU: alloc texture %dx%d", sourceFboWidth >> i, sourceFboHeight >> i);
-            fbo->allocateBuffers(sourceFboWidth >> i, sourceFboHeight >> i, nullptr,
-                                 GL_LINEAR, GL_MIRRORED_REPEAT,
-                                 GL_RGB10_A2, GL_RGBA, GL_UNSIGNED_INT_2_10_10_10_REV);
-
-            if (fbo->getStatus() != GL_FRAMEBUFFER_COMPLETE) {
-                ALOGE("Invalid pass buffer");
-                return fbo->getStatus();
-            }
-
-            mPassFbos.push_back(fbo);
-        }
-
-        if (!mDownsampleProgram.isValid()) {
-            ALOGE("Invalid downsample shader");
-            return GL_INVALID_OPERATION;
-        }
-        if (!mUpsampleProgram.isValid()) {
-            ALOGE("Invalid upsample shader");
-            return GL_INVALID_OPERATION;
+            mDisplayHeight < display.physicalDisplay.height()) {
+        status_t status = prepareBuffers(display);
+        if (status != NO_ERROR) {
+            return status;
         }
     }
 
     // Approximate Gaussian blur radius
-    mRadius = radius;
-    auto [passes, offset] = convertGaussianRadius(radius);
-    ALOGI("SARU: ---------------------------------- new radius: %d  : passes=%d offset=%f", radius, passes, offset);
-    if (passes == -1) {
-        return BAD_VALUE;
+    if (radius != mRadius) {
+        mRadius = radius;
+        auto [passes, offset] = convertGaussianRadius(radius);
+        ALOGI("SARU: ---------------------------------- new radius: %d  : passes=%d offset=%f", radius, passes, offset);
+        mPasses = passes;
+        mOffset = offset;
     }
-    mPasses = passes;
-    mOffset = offset;
-
-    mPasses = 3;
-    mOffset = 3.25f;
 
     mCompositionFbo.bind();
     glViewport(0, 0, mCompositionFbo.getBufferWidth(), mCompositionFbo.getBufferHeight());
@@ -168,6 +179,7 @@ status_t BlurFilter::setAsDrawTarget(const DisplaySettings& display, uint32_t ra
 }
 
 std::tuple<int32_t, float> BlurFilter::convertGaussianRadius(uint32_t radius) {
+    // Test each pass level first
     for (auto i = 0; i < kMaxPasses; i++) {
         auto [minOffset, maxOffset] = kOffsetRanges[i];
         float offset = radius * kFboScale / std::pow(2, i + 1);
@@ -176,6 +188,7 @@ std::tuple<int32_t, float> BlurFilter::convertGaussianRadius(uint32_t radius) {
         }
     }
 
+    // FIXME: handle minmax properly
     return {1, radius * kFboScale / std::pow(2, 1)};
 }
 
@@ -202,13 +215,28 @@ void BlurFilter::drawMesh(GLuint vertexArray) {
     glBindVertexArray(0);
 }
 
+void BlurFilter::renderPass(GLFramebuffer* read, GLFramebuffer* draw, GLuint halfPixel, GLuint vertexArray) {
+    auto targetWidth = draw->getBufferWidth();
+    auto targetHeight = draw->getBufferHeight();
+    glViewport(0, 0, targetWidth, targetHeight);
+
+    ALOGI("SARU: blur to %dx%d", targetWidth, targetHeight);
+
+    glBindTexture(GL_TEXTURE_2D, read->getTextureName());
+    draw->bind();
+
+    // 1/2 pixel size in NDC
+    glUniform2f(halfPixel, 0.5 / targetWidth, 0.5 / targetHeight);
+    drawMesh(vertexArray);
+}
+
 status_t BlurFilter::prepare() {
     ATRACE_NAME("BlurFilter::prepare");
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, mCompositionFbo.getTextureName());
 
-    ALOGI("SARU: prepare - initial dims %dx%d", mPassFbos[0]->getBufferWidth(), mPassFbos[0]->getBufferHeight());
+    ALOGI("SARU: prepare - initial dims %dx%d", mPassFbos[0].getBufferWidth(), mPassFbos[0].getBufferHeight());
 
     // Set up downsampling shader
     mDownsampleProgram.useProgram();
@@ -223,25 +251,10 @@ status_t BlurFilter::prepare() {
         ATRACE_NAME("BlurFilter::renderDownsamplePass");
 
         // Skip FBO 0 to avoid unnecessary blit
-        draw = mPassFbos[i + 1];
-        if (i == 0) {
-            read = &mCompositionFbo;
-        } else {
-            read = mPassFbos[i];
-        }
+        read = (i == 0) ? &mCompositionFbo : &mPassFbos[i];
+        draw = &mPassFbos[i + 1];
 
-        auto targetWidth = draw->getBufferWidth();
-        auto targetHeight = draw->getBufferHeight();
-        glViewport(0, 0, targetWidth, targetHeight);
-
-        ALOGI("SARU: downsample to %dx%d", targetWidth, targetHeight);
-
-        glBindTexture(GL_TEXTURE_2D, read->getTextureName());
-        draw->bind();
-
-        // 1/2 pixel size in NDC
-        glUniform2f(mDHalfPixelLoc, 0.5 / targetWidth, 0.5 / targetHeight);
-        drawMesh(mDVertexArray);
+        renderPass(read, draw, mDHalfPixelLoc, mDVertexArray);
     }
 
     // Set up upsampling shader
@@ -253,22 +266,11 @@ status_t BlurFilter::prepare() {
     for (auto i = 0; i < mPasses; i++) {
         ATRACE_NAME("BlurFilter::renderUpsamplePass");
 
-        // Upsampling goes in the reverse direction
-        read = mPassFbos[mPasses - i];
-        draw = mPassFbos[mPasses - i - 1];
+        // Upsampling uses buffers in the reverse direction
+        read = &mPassFbos[mPasses - i];
+        draw = &mPassFbos[mPasses - i - 1];
 
-        auto targetWidth = draw->getBufferWidth();
-        auto targetHeight = draw->getBufferHeight();
-        glViewport(0, 0, targetWidth, targetHeight);
-
-        ALOGI("SARU: upsample to %dx%d", targetWidth, targetHeight);
-
-        glBindTexture(GL_TEXTURE_2D, read->getTextureName());
-        draw->bind();
-
-        // 1/2 pixel size in NDC
-        glUniform2f(mUHalfPixelLoc, 0.5 / targetWidth, 0.5 / targetHeight);
-        drawMesh(mUVertexArray);
+        renderPass(read, draw, mUHalfPixelLoc, mUVertexArray);
     }
 
     mLastDrawTarget = draw;
@@ -403,7 +405,7 @@ string BlurFilter::getMixFragShader() const {
             vec3 dither = texture(uDitherTexture, gl_FragCoord.xy / 64.0).rgb / 64.0;
             blurred = vec4(blurred.rgb + dither, 1.0);
 
-            fragColor = mix(composition, blurred, 1.0);
+            fragColor = mix(composition, blurred, uBlurOpacity);
         }
     )SHADER";
 }

@@ -36,11 +36,12 @@ class BlurFilter {
 public:
     // Downsample FBO to improve performance
     static constexpr float kFboScale = 0.2f;
+    // We allocate FBOs for this many passes to avoid the overhead of dynamic allocation.
+    // If you change this, be sure to update kOffsetRanges as well.
     static constexpr uint32_t kMaxPasses = 5;
     // To avoid downscaling artifacts, we interpolate the blurred fbo with the full composited
     // image, up to this radius.
     static constexpr float kMaxCrossFadeRadius = 40.0f;
-    // We allocate space for 
 
     explicit BlurFilter(GLESRenderEngine& engine);
     virtual ~BlurFilter(){};
@@ -57,9 +58,12 @@ private:
     uint32_t mPasses;
     float mOffset;
 
+    status_t prepareBuffers(const DisplaySettings& display);
     std::tuple<int32_t, float> convertGaussianRadius(uint32_t radius);
     void createVertexArray(GLuint* vertexArray, GLuint position, GLuint uv);
     void drawMesh(GLuint vertexArray);
+    void renderPass(GLFramebuffer* read, GLFramebuffer* draw, GLuint halfPixel, GLuint vertexArray);
+
     string getVertexShader() const;
     string getDownsampleFragShader() const;
     string getUpsampleFragShader() const;
@@ -70,8 +74,8 @@ private:
     GLFramebuffer mCompositionFbo;
     // Frame buffer holding the Bayer dithering matrix.
     GLFramebuffer mDitherFbo;
-    // Frame buffers holding the blur passes.
-    std::vector<GLFramebuffer*> mPassFbos;
+    // Frame buffers holding the blur passes. (one extra for final upsample to source FBO size)
+    std::vector<GLFramebuffer> mPassFbos;
     // Buffer holding the final blur pass.
     GLFramebuffer* mLastDrawTarget;
 
