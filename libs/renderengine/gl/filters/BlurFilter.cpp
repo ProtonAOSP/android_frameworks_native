@@ -396,12 +396,27 @@ string BlurFilter::getMixFragShader() const {
         in highp vec2 vUV;
         out vec4 fragColor;
 
+        vec3 srgb_to_linear(vec3 linear) {
+            return mix(linear / 12.92, pow((linear + .055) / 1.055, vec3(2.4)), lessThan(vec3(0.04045), linear));
+        }
+
+        vec3 linear_to_srgb(vec3 srgb) {
+            return mix(12.92 * srgb, 1.055 * pow(srgb, vec3(0.416667)) - .055, lessThan(vec3(0.0031308), srgb));
+        }
+
+        vec3 dither(vec3 arg, vec3 noise, float quant ) {
+            vec3 c0 = floor( linear_to_srgb( arg ) / quant ) * quant;
+            vec3 c1 = c0 + quant;
+            vec3 discr = mix( srgb_to_linear( c0 ), srgb_to_linear( c1 ), noise );
+            return mix( c0, c1, lessThan( discr, arg ) );
+        }
+
         void main() {
             vec4 blurred = texture(uBlurredTexture, vUV);
             vec4 composition = texture(uCompositionTexture, vUV);
 
-            vec3 dither = texture(uDitherTexture, gl_FragCoord.xy / 64.0).rgb / 64.0;
-            blurred = vec4(blurred.rgb + dither, 1.0);
+            vec3 ditherNoise = texture(uDitherTexture, gl_FragCoord.xy / 64.0).rgb;
+            blurred = vec4(dither(srgb_to_linear(blurred.rgb), ditherNoise, 1.0 / 255.0), 1.0);
 
             fragColor = mix(composition, blurred, 1.0);
         }
