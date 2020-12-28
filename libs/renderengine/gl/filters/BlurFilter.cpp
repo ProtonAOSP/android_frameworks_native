@@ -215,6 +215,15 @@ status_t BlurFilter::prepare() {
 
     glActiveTexture(GL_TEXTURE0);
 
+    GLFramebuffer* firstBuf = mPassFbos[0];
+    mCompositionFbo.bindAsReadBuffer();
+    firstBuf->bindAsDrawBuffer();
+    glBlitFramebuffer(0, 0,
+                      mCompositionFbo.getBufferWidth(), mCompositionFbo.getBufferHeight(),
+                      0, 0,
+                      firstBuf->getBufferWidth(), firstBuf->getBufferHeight(),
+                      GL_COLOR_BUFFER_BIT, GL_LINEAR);
+
     ALOGI("SARU: prepare - initial dims %dx%d", mPassFbos[0]->getBufferWidth(), mPassFbos[0]->getBufferHeight());
 
     // Set up downsampling shader
@@ -230,7 +239,7 @@ status_t BlurFilter::prepare() {
         ATRACE_NAME("BlurFilter::renderDownsamplePass");
 
         // Skip FBO 0 to avoid unnecessary blit
-        read = (i == 0) ? &mCompositionFbo : mPassFbos[i];
+        read = mPassFbos[i];
         draw = mPassFbos[i + 1];
 
         renderPass(read, draw);
