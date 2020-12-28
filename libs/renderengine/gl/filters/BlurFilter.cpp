@@ -177,7 +177,7 @@ status_t BlurFilter::setAsDrawTarget(const DisplaySettings& display, uint32_t ra
 
 std::tuple<int32_t, float> BlurFilter::convertGaussianRadius(uint32_t radius) {
     // Test each pass level first
-    for (auto i = 0; i < kMaxPasses; i++) {
+    for (auto i = 0; i < 1; i++) {
         auto [minOffset, maxOffset] = kOffsetRanges[i];
         float offset = radius * kFboScale / std::pow(2, i + 1);
         if (offset >= minOffset && offset <= maxOffset) {
@@ -387,7 +387,7 @@ string BlurFilter::getMixFragShader() const {
             vec3 dither = texture(uDitherTexture, gl_FragCoord.xy / 64.0).rgb / 64.0;
             blurred = vec4(blurred.rgb + dither, 1.0);
 
-            fragColor = mix(composition, blurred, uBlurOpacity);
+            fragColor = mix(composition, blurred, 1.0);
         }
     )SHADER";
 }
