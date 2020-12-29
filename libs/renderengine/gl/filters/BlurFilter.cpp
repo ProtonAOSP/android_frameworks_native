@@ -32,7 +32,7 @@
 // Too high: diagonal sampling artifacts
 static const std::vector<std::tuple<float, float>> kOffsetRanges = {
     {1.00,  2.50}, // pass 1
-    {1.00,  3.00}, // pass 2
+    {1.25,  4.25}, // pass 2
     {1.50, 11.25}, // pass 3
     {1.75, 18.00}, // pass 4
     {2.00, 20.00}, // pass 5
@@ -178,7 +178,7 @@ status_t BlurFilter::setAsDrawTarget(const DisplaySettings& display, uint32_t ra
 
 std::tuple<int32_t, float> BlurFilter::convertGaussianRadius(uint32_t radius) {
     // Test each pass level first
-    for (auto i = 0; i < 1; i++) {
+    for (auto i = 0; i < kMaxPasses; i++) {
         auto [minOffset, maxOffset] = kOffsetRanges[i];
         float offset = radius * kFboScale / std::pow(2, i + 1);
         if (offset >= minOffset && offset <= maxOffset) {
