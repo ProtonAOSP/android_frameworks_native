@@ -70,9 +70,12 @@ BlurFilter::BlurFilter(GLESRenderEngine& engine)
     mMeshBuffer.allocateBuffers(vboData, 12 /* size */);
     createVertexArray(&mVertexArray, 0, 1);
 
-    mDitherFbo.allocateBuffers(64, 64, (void *) kBlurNoisePattern,
+    for (auto i = 0; i < 256 * 256; i++) {
+        kBlurNoisePattern[i] = kBlurNoisePattern[i] % 5 + (128 - 5 / 2);
+    }
+    mDitherFbo.allocateBuffers(256, 256, (void *) kBlurNoisePattern,
                                GL_NEAREST, GL_REPEAT,
-                               GL_RGB, GL_RGB, GL_UNSIGNED_BYTE);
+                               GL_R8, GL_RED, GL_UNSIGNED_BYTE);
 }
 
 void BlurFilter::createVertexArray(GLuint* vertexArray, GLuint position, GLuint uv) {
@@ -170,6 +173,8 @@ status_t BlurFilter::setAsDrawTarget(const DisplaySettings& display, uint32_t ra
         mPasses = passes;
         mOffset = offset;
     }
+    mPasses = 4;
+    mOffset = 8.0f;
 
     mCompositionFbo.bind();
     glViewport(0, 0, mCompositionFbo.getBufferWidth(), mCompositionFbo.getBufferHeight());
@@ -397,8 +402,8 @@ string BlurFilter::getMixFragShader() const {
 
             // First /64: screen coordinates -> texture coordinates (UV)
             // Second /64: reduce magnitude to make it a dither instead of an overlay (from Bayer 8x8)
-            vec3 dither = texture(uDitherTexture, gl_FragCoord.xy / 64.0).rgb / 64.0;
-            blurred = vec4(blurred.rgb + dither, 1.0);
+            vec2 uvNoise = gl_FragCoord.xy / 512.0;
+            blurred = vec4(blurred.rgb, 1.0) - (vec4(0.5, 0.5, 0.5, 0.0) - vec4(texture(uDitherTexture, uvNoise).rrr, 0.0));
 
             fragColor = mix(composition, blurred, 1.0);
         }
