@@ -54,7 +54,7 @@ public:
     status_t render(bool multiPass);
 
 private:
-    uint32_t mRadius;
+    float mRadius;
     uint32_t mPasses;
     float mOffset;
 
@@ -62,11 +62,11 @@ private:
     std::tuple<int32_t, float> convertGaussianRadius(uint32_t radius);
     void createVertexArray(GLuint* vertexArray, GLuint position, GLuint uv);
     void drawMesh(GLuint vertexArray);
-    void renderPass(GLFramebuffer* read, GLFramebuffer* draw, GLuint halfPixel, GLuint vertexArray);
+    void renderPass(GLFramebuffer* read, GLFramebuffer* draw);
 
-    string getVertexShader() const;
-    string getDownsampleFragShader() const;
-    string getUpsampleFragShader() const;
+    string getBlurVertexShader() const;
+    string getBlurFragShader() const;
+    string getMixVertexShader() const;
     string getMixFragShader() const;
 
     GLESRenderEngine& mEngine;
@@ -74,10 +74,10 @@ private:
     GLFramebuffer mCompositionFbo;
     // Frame buffer holding the Bayer dithering matrix.
     GLFramebuffer mDitherFbo;
-    // Frame buffers holding the blur passes. (one extra for final upsample to source FBO size)
-    std::vector<GLFramebuffer*> mPassFbos;
-    // Buffer holding the final blur pass.
-    GLFramebuffer* mLastDrawTarget;
+    // Frame buffers holding the blur passes.
+    GLFramebuffer mBlurSourceFbo;
+    GLFramebuffer mBlurFboH;
+    GLFramebuffer mBlurFboV;
 
     uint32_t mDisplayWidth = 0;
     uint32_t mDisplayHeight = 0;
@@ -95,22 +95,18 @@ private:
     GLuint mMBlurredTextureLoc;
     GLuint mMDitherTextureLoc;
     GLuint mMVertexArray;
+    GLuint mMRadiusLoc;
+    GLuint mMSizeLoc;
+    GLuint mMDirLoc;
 
-    GenericProgram mDownsampleProgram;
-    GLuint mDPosLoc;
-    GLuint mDUvLoc;
-    GLuint mDTextureLoc;
-    GLuint mDOffsetLoc;
-    GLuint mDHalfPixelLoc;
-    GLuint mDVertexArray;
-
-    GenericProgram mUpsampleProgram;
-    GLuint mUPosLoc;
-    GLuint mUUvLoc;
-    GLuint mUTextureLoc;
-    GLuint mUOffsetLoc;
-    GLuint mUHalfPixelLoc;
-    GLuint mUVertexArray;
+    GenericProgram mBlurProgram;
+    GLuint mBPosLoc;
+    GLuint mBUvLoc;
+    GLuint mBTextureLoc;
+    GLuint mBRadiusLoc;
+    GLuint mBSizeLoc;
+    GLuint mBDirLoc;
+    GLuint mBVertexArray;
 };
 
 } // namespace gl
