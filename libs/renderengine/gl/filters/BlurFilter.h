@@ -61,8 +61,8 @@ private:
     status_t prepareBuffers(const DisplaySettings& display);
     std::tuple<int32_t, float> convertGaussianRadius(uint32_t radius);
     void createVertexArray(GLuint* vertexArray, GLuint position, GLuint uv);
-    void drawMesh();
-    void renderPass(GLFramebuffer* read, GLFramebuffer* draw);
+    void drawMesh(GLuint vertexArray);
+    void renderPass(GLFramebuffer* read, GLFramebuffer* draw, GLuint halfPixel, GLuint vertexArray);
 
     string getVertexShader() const;
     string getDownsampleFragShader() const;
@@ -86,11 +86,31 @@ private:
 
     // VBO containing vertex and uv data of a fullscreen triangle.
     GLVertexBuffer mMeshBuffer;
-    GLuint mVertexArray;
 
     GenericProgram mMixProgram;
+    GLuint mMPosLoc;
+    GLuint mMUvLoc;
+    GLuint mMBlurOpacityLoc;
+    GLuint mMCompositionTextureLoc;
+    GLuint mMBlurredTextureLoc;
+    GLuint mMDitherTextureLoc;
+    GLuint mMVertexArray;
+
     GenericProgram mDownsampleProgram;
+    GLuint mDPosLoc;
+    GLuint mDUvLoc;
+    GLuint mDTextureLoc;
+    GLuint mDOffsetLoc;
+    GLuint mDHalfPixelLoc;
+    GLuint mDVertexArray;
+
     GenericProgram mUpsampleProgram;
+    GLuint mUPosLoc;
+    GLuint mUUvLoc;
+    GLuint mUTextureLoc;
+    GLuint mUOffsetLoc;
+    GLuint mUHalfPixelLoc;
+    GLuint mUVertexArray;
 };
 
 } // namespace gl
