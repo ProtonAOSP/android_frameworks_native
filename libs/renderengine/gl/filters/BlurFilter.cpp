@@ -217,7 +217,7 @@ void BlurFilter::drawMesh(GLuint vertexArray) {
     glBindVertexArray(0);
 }
 
-void BlurFilter::renderPass(GLFramebuffer* read, GLFramebuffer* draw, GLuint halfPixel, GLuint vertexArray) {
+void BlurFilter::renderPass(GLFramebuffer* read, GLFramebuffer* draw, GLuint halfPixelLoc, GLuint vertexArray) {
     auto targetWidth = draw->getBufferWidth();
     auto targetHeight = draw->getBufferHeight();
     glViewport(0, 0, targetWidth, targetHeight);
@@ -229,7 +229,7 @@ void BlurFilter::renderPass(GLFramebuffer* read, GLFramebuffer* draw, GLuint hal
 
     // 1/2 pixel offset in texture coordinate (UV) space
     // Note that this is different from NDC!
-    glUniform2f(halfPixel, 0.5 / targetWidth, 0.5 / targetHeight);
+    glUniform2f(halfPixelLoc, 0.5 / targetWidth, 0.5 / targetHeight);
     drawMesh(vertexArray);
 }
 
