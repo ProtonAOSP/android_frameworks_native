@@ -110,7 +110,7 @@ status_t BlurFilter::prepareBuffers(const DisplaySettings& display) {
     const uint32_t sourceFboWidth = floorf(mDisplayWidth * kFboScale);
     const uint32_t sourceFboHeight = floorf(mDisplayHeight * kFboScale);
     mBlurSourceFbo.allocateBuffers(sourceFboWidth, sourceFboHeight, nullptr,
-                            GL_LINEAR, GL_MIRRORED_REPEAT,
+                            GL_LINEAR, GL_CLAMP_TO_EDGE,
                             // 2-10-10-10 reversed is the only 10-bpc format in GLES 3.1
                             GL_RGB10_A2, GL_RGBA, GL_UNSIGNED_INT_2_10_10_10_REV);
     if (mBlurSourceFbo.getStatus() != GL_FRAMEBUFFER_COMPLETE) {
@@ -118,7 +118,7 @@ status_t BlurFilter::prepareBuffers(const DisplaySettings& display) {
         return mBlurSourceFbo.getStatus();
     }
     mBlurFboH.allocateBuffers(sourceFboWidth, sourceFboHeight, nullptr,
-                            GL_LINEAR, GL_MIRRORED_REPEAT,
+                            GL_LINEAR, GL_CLAMP_TO_EDGE,
                             // 2-10-10-10 reversed is the only 10-bpc format in GLES 3.1
                             GL_RGB10_A2, GL_RGBA, GL_UNSIGNED_INT_2_10_10_10_REV);
     if (mBlurFboH.getStatus() != GL_FRAMEBUFFER_COMPLETE) {
@@ -126,7 +126,7 @@ status_t BlurFilter::prepareBuffers(const DisplaySettings& display) {
         return mBlurFboH.getStatus();
     }
     mBlurFboV.allocateBuffers(sourceFboWidth, sourceFboHeight, nullptr,
-                            GL_LINEAR, GL_MIRRORED_REPEAT,
+                            GL_LINEAR, GL_CLAMP_TO_EDGE,
                             // 2-10-10-10 reversed is the only 10-bpc format in GLES 3.1
                             GL_RGB10_A2, GL_RGBA, GL_UNSIGNED_INT_2_10_10_10_REV);
     if (mBlurFboV.getStatus() != GL_FRAMEBUFFER_COMPLETE) {
@@ -247,12 +247,12 @@ status_t BlurFilter::prepare() {
     mBlurProgram.useProgram();
     glUniform1i(mBTextureLoc, 0);
     glUniform2f(mBSizeLoc, mBlurFboH.getBufferWidth(), mBlurFboH.getBufferHeight());
-    glUniform1f(mBRadiusLoc, mRadius);
-    glUniform2f(mBDirLoc, 1, 0);
+    glUniform1f(mBRadiusLoc, mRadius / 2.0f);
+    glUniform1i(mBDirLoc, 0);
     renderPass(&mBlurSourceFbo, &mBlurFboH);
 
     ATRACE_NAME("BlurFilter::renderVerticalPass");
-    glUniform2f(mBDirLoc, 0, 1);
+    glUniform1i(mBDirLoc, 1);
     renderPass(&mBlurFboH, &mBlurFboV);
 
     return NO_ERROR;
@@ -279,9 +279,6 @@ status_t BlurFilter::render(bool /*multiPass*/) {
     // Crossfade using mix shader
     mMixProgram.useProgram();
     glUniform1f(mMBlurOpacityLoc, opacity);
-    glUniform2f(mMSizeLoc, mBlurFboH.getBufferWidth(), mBlurFboH.getBufferHeight());
-    glUniform1f(mMRadiusLoc, mRadius);
-    glUniform2f(mMDirLoc, 1, 0);
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, mCompositionFbo.getTextureName());
@@ -311,29 +308,67 @@ string BlurFilter::getBlurVertexShader() const {
 
         uniform float uBlurRadius;
         uniform vec2 uBlurSize;
-        uniform vec2 uBlurDir;
+        uniform int uBlurDir;
 
         in vec2 aPosition;
         in highp vec2 aUV;
         out highp vec2 vUV;
-        flat out vec2 vPixelStep;
-        flat out float vPixelsPerSide;
-        flat out vec3 vInitialGaussian;
+        flat out vec2 vOffsetScale;
+        flat out int vSupport;
+        flat out vec2 vGaussCoefficients;
 
-        const float PI = 3.14159265;
-        const float RADIUS_MULTIPLIER = 2.0;
+        void calculateGaussCoefficients(float sigma) {
+            // Incremental Gaussian Coefficent Calculation (See GPU Gems 3 pp. 877 - 889)
+            vGaussCoefficients = vec2(1.0 / (sqrt(2.0 * 3.14159265) * sigma),
+                                    exp(-0.5 / (sigma * sigma)));
+
+            // Pre-calculate the coefficient total in the vertex shader so that
+            // we can avoid having to do it per-fragment and also avoid division
+            // by zero in the degenerate case.
+            vec3 gauss_coefficient = vec3(vGaussCoefficients,
+                                        vGaussCoefficients.y * vGaussCoefficients.y);
+            float gauss_coefficient_total = gauss_coefficient.x;
+            for (int i = 1; i <= vSupport; i += 2) {
+                gauss_coefficient.xy *= gauss_coefficient.yz;
+                float gauss_coefficient_subtotal = gauss_coefficient.x;
+                gauss_coefficient.xy *= gauss_coefficient.yz;
+                gauss_coefficient_subtotal += gauss_coefficient.x;
+                gauss_coefficient_total += 2.0 * gauss_coefficient_subtotal;
+            }
+
+            // Scale initial coefficient by total to avoid passing the total separately
+            // to the fragment shader.
+            vGaussCoefficients.x /= gauss_coefficient_total;
+        }
 
         void main() {
             vUV = aUV;
             gl_Position = vec4(aPosition, 0.0, 1.0);
 
-            vPixelStep = (vec2(1.0) / uBlurSize) * uBlurDir;
-            vPixelsPerSide = floor(uBlurRadius * RADIUS_MULTIPLIER / 2.0);
+            // Ensure that the support is an even number of pixels to simplify the
+            // fragment shader logic.
+            //
+            // TODO(pcwalton): Actually make use of this fact and use the texture
+            // hardware for linear filtering.
+            vSupport = int(ceil(1.5 * uBlurRadius)) * 2;
 
-            float sigma = uBlurRadius / 2.0; // *shrug*
-            vInitialGaussian.x = 1.0 / (sqrt(2.0 * PI) * sigma);
-            vInitialGaussian.y = exp(-0.5 / (sigma * sigma));
-            vInitialGaussian.z = vInitialGaussian.y * vInitialGaussian.y;
+            if (vSupport > 0) {
+                calculateGaussCoefficients(uBlurRadius);
+            } else {
+                // The gauss function gets NaNs when blur radius is zero.
+                vGaussCoefficients = vec2(1.0, 1.0);
+            }
+
+            switch (uBlurDir) {
+                case 0:
+                    vOffsetScale = vec2(1.0 / uBlurSize.x, 0.0);
+                    break;
+                case 1:
+                    vOffsetScale = vec2(0.0, 1.0 / uBlurSize.y);
+                    break;
+                default:
+                    vOffsetScale = vec2(0.0);
+            }
         }
     )SHADER";
 }
@@ -346,34 +381,59 @@ string BlurFilter::getBlurFragShader() const {
         uniform sampler2D uTexture;
 
         in highp vec2 vUV;
-        flat in vec2 vPixelStep;
-        flat in float vPixelsPerSide;
-        flat in vec3 vInitialGaussian;
+        flat in vec2 vOffsetScale;
+        flat in int vSupport;
+        flat in vec2 vGaussCoefficients;
         out vec4 fragColor;
 
         // blur_radius 0 is NOT supported and MUST be caught before.
 
         // Partially from http://callumhay.blogspot.com/2010/09/gaussian-blur-shader-glsl.html
         void main() {
-            vec3 incrementalGaussian = vInitialGaussian;
+            vec4 original_color = texture(uTexture, vUV);
 
-            float coefficientSum = 0.0;
-            vec4 sum = texture(uTexture, vUV) * incrementalGaussian.x;
-            coefficientSum += incrementalGaussian.x;
-            incrementalGaussian.xy *= incrementalGaussian.yz;
+            // Incremental Gaussian Coefficent Calculation (See GPU Gems 3 pp. 877 - 889)
+            vec3 gauss_coefficient = vec3(vGaussCoefficients,
+                                        vGaussCoefficients.y * vGaussCoefficients.y);
 
-            vec2 p = vPixelStep;
-            for (int i = 1; i <= int(vPixelsPerSide); i++) {
-                sum += texture(uTexture, vUV - p) * incrementalGaussian.x;
-                sum += texture(uTexture, vUV + p) * incrementalGaussian.x;
+            vec4 avg_color = original_color * gauss_coefficient.x;
 
-                coefficientSum += 2.0 * incrementalGaussian.x;
-                incrementalGaussian.xy *= incrementalGaussian.yz;
+            // Evaluate two adjacent texels at a time. We can do this because, if c0
+            // and c1 are colors of adjacent texels and k0 and k1 are arbitrary
+            // factors, this formula:
+            //
+            //     k0 * c0 + k1 * c1          (Equation 1)
+            //
+            // is equivalent to:
+            //
+            //                                 k1
+            //     (k0 + k1) * lerp(c0, c1, -------)
+            //                              k0 + k1
+            //
+            // A texture lookup of adjacent texels evaluates this formula:
+            //
+            //     lerp(c0, c1, t)
+            //
+            // for some t. So we can let `t = k1/(k0 + k1)` and effectively evaluate
+            // Equation 1 with a single texture lookup.
 
-                p += vPixelStep;
+            for (int i = 1; i <= vSupport; i += 2) {
+                gauss_coefficient.xy *= gauss_coefficient.yz;
+
+                float gauss_coefficient_subtotal = gauss_coefficient.x;
+                gauss_coefficient.xy *= gauss_coefficient.yz;
+                gauss_coefficient_subtotal += gauss_coefficient.x;
+                float gauss_ratio = gauss_coefficient.x / gauss_coefficient_subtotal;
+
+                vec2 offset = vOffsetScale * (float(i) + gauss_ratio);
+
+                vec2 st0 = vUV - offset;
+                vec2 st1 = vUV + offset;
+                avg_color += (texture(uTexture, st0) + texture(uTexture, st1)) *
+                            gauss_coefficient_subtotal;
             }
 
-            fragColor = sum / coefficientSum;
+            fragColor = avg_color;
         }
     )SHADER";
 }
