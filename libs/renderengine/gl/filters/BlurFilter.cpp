@@ -237,7 +237,6 @@ status_t BlurFilter::prepare() {
     ATRACE_NAME("BlurFilter::prepare");
 
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, mCompositionFbo.getTextureName());
 
     GLFramebuffer* firstBuf = mPassFbos[0];
     mCompositionFbo.bindAsReadBuffer();
