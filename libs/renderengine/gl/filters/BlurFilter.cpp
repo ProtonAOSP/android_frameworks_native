@@ -47,11 +47,9 @@ BlurFilter::BlurFilter(GLESRenderEngine& engine)
       : mEngine(engine),
         mCompositionFbo(engine),
         mDitherFbo(engine),
-        mBlurSourceFbo(engine),
-        mBlurFboH(engine),
-        mBlurFboV(engine),
         mMixProgram(engine),
-        mBlurProgram(engine) {
+        mDownsampleProgram(engine),
+        mUpsampleProgram(engine) {
     // Create VBO first for usage in shader VAOs
     static constexpr auto size = 2.0f;
     static constexpr auto translation = 1.0f;
@@ -68,26 +66,30 @@ BlurFilter::BlurFilter(GLESRenderEngine& engine)
     };
     mMeshBuffer.allocateBuffers(vboData, 12 /* size */);
 
-    mMixProgram.compile(getMixVertexShader(), getMixFragShader());
+    mMixProgram.compile(getVertexShader(), getMixFragShader());
     mMPosLoc = mMixProgram.getAttributeLocation("aPosition");
     mMUvLoc = mMixProgram.getAttributeLocation("aUV");
     mMCompositionTextureLoc = mMixProgram.getUniformLocation("uCompositionTexture");
     mMBlurredTextureLoc = mMixProgram.getUniformLocation("uBlurredTexture");
     mMDitherTextureLoc = mMixProgram.getUniformLocation("uDitherTexture");
     mMBlurOpacityLoc = mMixProgram.getUniformLocation("uBlurOpacity");
-    mMRadiusLoc = mMixProgram.getUniformLocation("uBlurRadius");
-    mMSizeLoc = mMixProgram.getUniformLocation("uBlurSize");
-    mMDirLoc = mMixProgram.getUniformLocation("uBlurDir");
     createVertexArray(&mMVertexArray, mMPosLoc, mMUvLoc);
 
-    mBlurProgram.compile(getBlurVertexShader(), getBlurFragShader());
-    mBPosLoc = mBlurProgram.getAttributeLocation("aPosition");
-    mBUvLoc = mBlurProgram.getAttributeLocation("aUV");
-    mBTextureLoc = mBlurProgram.getUniformLocation("uTexture");
-    mBRadiusLoc = mBlurProgram.getUniformLocation("uBlurRadius");
-    mBSizeLoc = mBlurProgram.getUniformLocation("uBlurSize");
-    mBDirLoc = mBlurProgram.getUniformLocation("uBlurDir");
-    createVertexArray(&mBVertexArray, mBPosLoc, mBUvLoc);
+    mDownsampleProgram.compile(getVertexShader(), getDownsampleFragShader());
+    mDPosLoc = mDownsampleProgram.getAttributeLocation("aPosition");
+    mDUvLoc = mDownsampleProgram.getAttributeLocation("aUV");
+    mDTextureLoc = mDownsampleProgram.getUniformLocation("uTexture");
+    mDOffsetLoc = mDownsampleProgram.getUniformLocation("uOffset");
+    mDHalfPixelLoc = mDownsampleProgram.getUniformLocation("uHalfPixel");
+    createVertexArray(&mDVertexArray, mDPosLoc, mDUvLoc);
+
+    mUpsampleProgram.compile(getVertexShader(), getUpsampleFragShader());
+    mUPosLoc = mUpsampleProgram.getAttributeLocation("aPosition");
+    mUUvLoc = mUpsampleProgram.getAttributeLocation("aUV");
+    mUTextureLoc = mUpsampleProgram.getUniformLocation("uTexture");
+    mUOffsetLoc = mUpsampleProgram.getUniformLocation("uOffset");
+    mUHalfPixelLoc = mUpsampleProgram.getUniformLocation("uHalfPixel");
+    createVertexArray(&mUVertexArray, mUPosLoc, mUUvLoc);
 
     mDitherFbo.allocateBuffers(64, 64, (void *) kBlurNoisePattern,
                                GL_NEAREST, GL_REPEAT,
@@ -106,32 +108,28 @@ status_t BlurFilter::prepareBuffers(const DisplaySettings& display) {
         return mCompositionFbo.getStatus();
     }
 
+    // Only allocate FBO wrapper objects once
+    if (mPassFbos.size() == 0) {
+        mPassFbos.reserve(kMaxPasses + 1);
+        for (auto i = 0; i < kMaxPasses + 1; i++) {
+            mPassFbos.push_back(new GLFramebuffer(mEngine));
+        }
+    }
+
     // Allocate FBOs for blur passes, using downscaled display size
     const uint32_t sourceFboWidth = floorf(mDisplayWidth * kFboScale);
     const uint32_t sourceFboHeight = floorf(mDisplayHeight * kFboScale);
-    mBlurSourceFbo.allocateBuffers(sourceFboWidth, sourceFboHeight, nullptr,
-                            GL_LINEAR, GL_MIRRORED_REPEAT,
-                            // 2-10-10-10 reversed is the only 10-bpc format in GLES 3.1
-                            GL_RGB10_A2, GL_RGBA, GL_UNSIGNED_INT_2_10_10_10_REV);
-    if (mBlurSourceFbo.getStatus() != GL_FRAMEBUFFER_COMPLETE) {
-        ALOGE("Invalid source blur buffer");
-        return mBlurSourceFbo.getStatus();
-    }
-    mBlurFboH.allocateBuffers(sourceFboWidth, sourceFboHeight, nullptr,
-                            GL_LINEAR, GL_MIRRORED_REPEAT,
-                            // 2-10-10-10 reversed is the only 10-bpc format in GLES 3.1
-                            GL_RGB10_A2, GL_RGBA, GL_UNSIGNED_INT_2_10_10_10_REV);
-    if (mBlurFboH.getStatus() != GL_FRAMEBUFFER_COMPLETE) {
-        ALOGE("Invalid horizontal blur buffer");
-        return mBlurFboH.getStatus();
-    }
-    mBlurFboV.allocateBuffers(sourceFboWidth, sourceFboHeight, nullptr,
-                            GL_LINEAR, GL_MIRRORED_REPEAT,
-                            // 2-10-10-10 reversed is the only 10-bpc format in GLES 3.1
-                            GL_RGB10_A2, GL_RGBA, GL_UNSIGNED_INT_2_10_10_10_REV);
-    if (mBlurFboV.getStatus() != GL_FRAMEBUFFER_COMPLETE) {
-        ALOGE("Invalid vertical blur buffer");
-        return mBlurFboV.getStatus();
+    for (auto i = 0; i < kMaxPasses + 1; i++) {
+        GLFramebuffer* fbo = mPassFbos[i];
+
+        fbo->allocateBuffers(sourceFboWidth >> i, sourceFboHeight >> i, nullptr,
+                                GL_LINEAR, GL_MIRRORED_REPEAT,
+                                // 2-10-10-10 reversed is the only 10-bpc format in GLES 3.1
+                                GL_RGB10_A2, GL_RGBA, GL_UNSIGNED_INT_2_10_10_10_REV);
+        if (fbo->getStatus() != GL_FRAMEBUFFER_COMPLETE) {
+            ALOGE("Invalid pass buffer");
+            return fbo->getStatus();
+        }
     }
 
     // Creating a BlurFilter doesn't necessarily mean that it will be used, so we
@@ -140,8 +138,12 @@ status_t BlurFilter::prepareBuffers(const DisplaySettings& display) {
         ALOGE("Invalid mix shader");
         return GL_INVALID_OPERATION;
     }
-    if (!mBlurProgram.isValid()) {
+    if (!mDownsampleProgram.isValid()) {
         ALOGE("Invalid downsample shader");
+        return GL_INVALID_OPERATION;
+    }
+    if (!mUpsampleProgram.isValid()) {
+        ALOGE("Invalid upsample shader");
         return GL_INVALID_OPERATION;
     }
 
@@ -166,8 +168,8 @@ status_t BlurFilter::setAsDrawTarget(const DisplaySettings& display, uint32_t ra
 
     // Approximate Gaussian blur radius
     if (radius != mRadius) {
-        mRadius = max(1.0f, ((float) radius) * kFboScale);
-        auto [passes, offset] = std::tuple<int32_t, float>(0, 0.0f); //convertGaussianRadius(radius);
+        mRadius = radius;
+        auto [passes, offset] = convertGaussianRadius(radius);
         ALOGI("SARU: ---------------------------------- new radius: %d  : passes=%d offset=%f", radius, passes, offset);
         mPasses = passes;
         mOffset = offset;
@@ -215,7 +217,7 @@ void BlurFilter::drawMesh(GLuint vertexArray) {
     glBindVertexArray(0);
 }
 
-void BlurFilter::renderPass(GLFramebuffer* read, GLFramebuffer* draw) {
+void BlurFilter::renderPass(GLFramebuffer* read, GLFramebuffer* draw, GLuint halfPixelLoc, GLuint vertexArray) {
     auto targetWidth = draw->getBufferWidth();
     auto targetHeight = draw->getBufferHeight();
     glViewport(0, 0, targetWidth, targetHeight);
@@ -225,7 +227,10 @@ void BlurFilter::renderPass(GLFramebuffer* read, GLFramebuffer* draw) {
     glBindTexture(GL_TEXTURE_2D, read->getTextureName());
     draw->bind();
 
-    drawMesh(mBVertexArray);
+    // 1/2 pixel offset in texture coordinate (UV) space
+    // Note that this is different from NDC!
+    glUniform2f(halfPixelLoc, 0.5 / targetWidth, 0.5 / targetHeight);
+    drawMesh(vertexArray);
 }
 
 status_t BlurFilter::prepare() {
@@ -233,28 +238,53 @@ status_t BlurFilter::prepare() {
 
     glActiveTexture(GL_TEXTURE0);
 
+    GLFramebuffer* firstBuf = mPassFbos[0];
     mCompositionFbo.bindAsReadBuffer();
-    mBlurSourceFbo.bindAsDrawBuffer();
+    firstBuf->bindAsDrawBuffer();
     glBlitFramebuffer(0, 0,
                       mCompositionFbo.getBufferWidth(), mCompositionFbo.getBufferHeight(),
                       0, 0,
-                      mBlurSourceFbo.getBufferWidth(), mBlurSourceFbo.getBufferHeight(),
+                      firstBuf->getBufferWidth(), firstBuf->getBufferHeight(),
                       GL_COLOR_BUFFER_BIT, GL_LINEAR);
 
-    ALOGI("SARU: prepare - initial dims %dx%d", mBlurSourceFbo.getBufferWidth(), mBlurSourceFbo.getBufferHeight());
+    ALOGI("SARU: prepare - initial dims %dx%d", mPassFbos[0]->getBufferWidth(), mPassFbos[0]->getBufferHeight());
 
-    ATRACE_NAME("BlurFilter::renderHorizontalPass");
-    mBlurProgram.useProgram();
-    glUniform1i(mBTextureLoc, 0);
-    glUniform2f(mBSizeLoc, mBlurFboH.getBufferWidth(), mBlurFboH.getBufferHeight());
-    glUniform1f(mBRadiusLoc, mRadius);
-    glUniform2f(mBDirLoc, 1, 0);
-    renderPass(&mBlurSourceFbo, &mBlurFboH);
+    // Set up downsampling shader
+    mDownsampleProgram.useProgram();
+    glUniform1i(mDTextureLoc, 0);
+    glUniform1f(mDOffsetLoc, mOffset);
 
-    ATRACE_NAME("BlurFilter::renderVerticalPass");
-    glUniform2f(mBDirLoc, 0, 1);
-    renderPass(&mBlurFboH, &mBlurFboV);
+    GLFramebuffer* read;
+    GLFramebuffer* draw;
 
+    // Downsample
+    for (auto i = 0; i < mPasses; i++) {
+        ATRACE_NAME("BlurFilter::renderDownsamplePass");
+
+        // Skip FBO 0 to avoid unnecessary blit
+        read = mPassFbos[i];
+        draw = mPassFbos[i + 1];
+
+        renderPass(read, draw, mDHalfPixelLoc, mDVertexArray);
+    }
+
+    // Set up upsampling shader
+    mUpsampleProgram.useProgram();
+    glUniform1i(mUTextureLoc, 0);
+    glUniform1f(mUOffsetLoc, mOffset);
+
+    // Upsample
+    for (auto i = 0; i < mPasses; i++) {
+        ATRACE_NAME("BlurFilter::renderUpsamplePass");
+
+        // Upsampling uses buffers in the reverse direction
+        read = mPassFbos[mPasses - i];
+        draw = mPassFbos[mPasses - i - 1];
+
+        renderPass(read, draw, mUHalfPixelLoc, mUVertexArray);
+    }
+
+    mLastDrawTarget = draw;
     return NO_ERROR;
 }
 
@@ -279,16 +309,13 @@ status_t BlurFilter::render(bool /*multiPass*/) {
     // Crossfade using mix shader
     mMixProgram.useProgram();
     glUniform1f(mMBlurOpacityLoc, opacity);
-    glUniform2f(mMSizeLoc, mBlurFboH.getBufferWidth(), mBlurFboH.getBufferHeight());
-    glUniform1f(mMRadiusLoc, mRadius);
-    glUniform2f(mMDirLoc, 1, 0);
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, mCompositionFbo.getTextureName());
     glUniform1i(mMCompositionTextureLoc, 0);
 
     glActiveTexture(GL_TEXTURE1);
-    glBindTexture(GL_TEXTURE_2D, mBlurFboV.getTextureName());
+    glBindTexture(GL_TEXTURE_2D, mLastDrawTarget->getTextureName());
     glUniform1i(mMBlurredTextureLoc, 1);
 
     glActiveTexture(GL_TEXTURE2);
@@ -304,92 +331,67 @@ status_t BlurFilter::render(bool /*multiPass*/) {
     return NO_ERROR;
 }
 
-string BlurFilter::getBlurVertexShader() const {
+string BlurFilter::getVertexShader() const {
     return R"SHADER(
         #version 310 es
         precision mediump float;
 
-        uniform float uBlurRadius;
-        uniform vec2 uBlurSize;
-        uniform vec2 uBlurDir;
-
         in vec2 aPosition;
         in highp vec2 aUV;
         out highp vec2 vUV;
-        flat out vec2 vPixelStep;
-        flat out float vPixelsPerSide;
-        flat out vec3 vInitialGaussian;
-
-        const float PI = 3.14159265;
-        const float RADIUS_MULTIPLIER = 2.0;
 
         void main() {
             vUV = aUV;
             gl_Position = vec4(aPosition, 0.0, 1.0);
-
-            vPixelStep = (vec2(1.0) / uBlurSize) * uBlurDir;
-            vPixelsPerSide = floor(uBlurRadius * RADIUS_MULTIPLIER / 2.0);
-
-            float sigma = uBlurRadius / 2.0; // *shrug*
-            vInitialGaussian.x = 1.0 / (sqrt(2.0 * PI) * sigma);
-            vInitialGaussian.y = exp(-0.5 / (sigma * sigma));
-            vInitialGaussian.z = vInitialGaussian.y * vInitialGaussian.y;
         }
     )SHADER";
 }
 
-string BlurFilter::getBlurFragShader() const {
+string BlurFilter::getDownsampleFragShader() const {
     return R"SHADER(
         #version 310 es
         precision mediump float;
 
         uniform sampler2D uTexture;
+        uniform float uOffset;
+        uniform vec2 uHalfPixel;
 
         in highp vec2 vUV;
-        flat in vec2 vPixelStep;
-        flat in float vPixelsPerSide;
-        flat in vec3 vInitialGaussian;
         out vec4 fragColor;
 
-        // blur_radius 0 is NOT supported and MUST be caught before.
-
-        // Partially from http://callumhay.blogspot.com/2010/09/gaussian-blur-shader-glsl.html
         void main() {
-            vec3 incrementalGaussian = vInitialGaussian;
-
-            float coefficientSum = 0.0;
-            vec4 sum = texture(uTexture, vUV) * incrementalGaussian.x;
-            coefficientSum += incrementalGaussian.x;
-            incrementalGaussian.xy *= incrementalGaussian.yz;
-
-            vec2 p = vPixelStep;
-            for (int i = 1; i <= int(vPixelsPerSide); i++) {
-                sum += texture(uTexture, vUV - p) * incrementalGaussian.x;
-                sum += texture(uTexture, vUV + p) * incrementalGaussian.x;
-
-                coefficientSum += 2.0 * incrementalGaussian.x;
-                incrementalGaussian.xy *= incrementalGaussian.yz;
-
-                p += vPixelStep;
-            }
-
-            fragColor = sum / coefficientSum;
+            vec4 sum = texture(uTexture, vUV) * 4.0;
+            sum += texture(uTexture, vUV - uHalfPixel.xy * uOffset);
+            sum += texture(uTexture, vUV + uHalfPixel.xy * uOffset);
+            sum += texture(uTexture, vUV + vec2(uHalfPixel.x, -uHalfPixel.y) * uOffset);
+            sum += texture(uTexture, vUV - vec2(uHalfPixel.x, -uHalfPixel.y) * uOffset);
+            fragColor = sum / 8.0;
         }
     )SHADER";
 }
 
-string BlurFilter::getMixVertexShader() const {
+string BlurFilter::getUpsampleFragShader() const {
     return R"SHADER(
         #version 310 es
         precision mediump float;
 
-        in vec2 aPosition;
-        in highp vec2 aUV;
-        out highp vec2 vUV;
+        uniform sampler2D uTexture;
+        uniform float uOffset;
+        uniform vec2 uHalfPixel;
+
+        in highp vec2 vUV;
+        out vec4 fragColor;
 
         void main() {
-            vUV = aUV;
-            gl_Position = vec4(aPosition, 0.0, 1.0);
+            vec4 sum = texture(uTexture, vUV + vec2(-uHalfPixel.x * 2.0, 0.0) * uOffset);
+            sum += texture(uTexture, vUV + vec2(-uHalfPixel.x, uHalfPixel.y) * uOffset) * 2.0;
+            sum += texture(uTexture, vUV + vec2(0.0, uHalfPixel.y * 2.0) * uOffset);
+            sum += texture(uTexture, vUV + vec2(uHalfPixel.x, uHalfPixel.y) * uOffset) * 2.0;
+            sum += texture(uTexture, vUV + vec2(uHalfPixel.x * 2.0, 0.0) * uOffset);
+            sum += texture(uTexture, vUV + vec2(uHalfPixel.x, -uHalfPixel.y) * uOffset) * 2.0;
+            sum += texture(uTexture, vUV + vec2(0.0, -uHalfPixel.y * 2.0) * uOffset);
+            sum += texture(uTexture, vUV + vec2(-uHalfPixel.x, -uHalfPixel.y) * uOffset) * 2.0;
+            fragColor = sum / 12.0;
         }
     )SHADER";
 }
