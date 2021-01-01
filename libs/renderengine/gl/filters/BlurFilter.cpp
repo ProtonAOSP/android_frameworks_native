@@ -364,16 +364,57 @@ string BlurFilter::getColorSpaceFragShader() const {
         in highp vec2 vUV;
         out vec4 fragColor;
 
-        vec3 srgbToLinear(vec3 srgb) {
+        vec3 srgbToLinearRgb(vec3 srgb) {
             vec3 linearRgb = srgb * 12.92;
             vec3 gammaRgb = (pow(srgb, vec3(1.0 / 2.4)) * 1.055) - 0.055;
             bvec3 selectParts = lessThan(srgb, vec3(0.0031308));
-            return mix(linearRgb, gammaRgb, selectParts);
+            return mix(gammaRgb, linearRgb, selectParts);
+        }
+
+        vec3 linearRgbToSrgb(vec3 linear) {
+            vec3 srgbLinear = linear / 12.92;
+            vec3 srgbGamma = pow((linear + 0.055) / 1.055, vec3(2.4));
+            bvec3 selectParts = lessThan(linear, vec3(0.04045));
+            return mix(srgbGamma, srgbLinear, selectParts);
+        }
+
+        vec3 linearRgbToOklab(vec3 linear)
+        {
+            vec3 lms = vec3(
+                dot(vec3(0.4121656120, 0.5362752080, 0.0514575653), linear),
+                dot(vec3(0.2118591070, 0.6807189584, 0.1074065790), linear),
+                dot(vec3(0.0883097947, 0.2818474174, 0.6302613616), linear)
+            );
+            vec3 lms_ = pow(lms, vec3(1.0 / 3.0));
+
+            return vec3(
+                dot(vec3(+0.2104542553, +0.7936177850, -0.0040720468), lms_),
+                dot(vec3(+1.9779984951, -2.4285922050, +0.4505937099), lms_),
+                dot(vec3(+0.0259040371, +0.7827717662, -0.8086757660), lms_)
+            );
+        }
+
+        vec3 oklabToLinearRgb(vec3 oklab)
+        {
+            // rgb = Lab
+            vec3 lms_ = vec3(
+                dot(vec3(+1.0, +0.3963377774, +0.2158037573), oklab),
+                dot(vec3(+1.0, -0.1055613458, -0.0638541728), oklab),
+                dot(vec3(+1.0, -0.0894841775, -1.2914855480), oklab)
+            );
+            vec3 lms = lms_ * lms_ * lms_;
+
+            return vec3(
+                dot(vec3(+4.0767245293, -3.3072168827, +0.2307590544), lms),
+                dot(vec3(-1.2681437731, +2.6093323231, -0.3411344290), lms),
+                dot(vec3(-0.0041119885, -0.7034763098, +1.7068625689), lms)
+            );
         }
 
         void main() {
-            vec3 linear = srgbToLinear(texture(uTexture, vUV).rgb);
-            fragColor = vec4(linear, 1.0);
+            vec3 linear = srgbToLinearRgb(texture(uTexture, vUV).rgb);
+            vec3 oklab = linearRgbToOklab(linear);
+            fragColor = vec4(oklab, 1.0);
         }
     )SHADER";
 }
@@ -440,16 +481,56 @@ string BlurFilter::getMixFragShader() const {
         in highp vec2 vUV;
         out vec4 fragColor;
 
-        vec3 linearToSrgb(vec3 linear) {
+        vec3 srgbToLinearRgb(vec3 srgb) {
+            vec3 linearRgb = srgb * 12.92;
+            vec3 gammaRgb = (pow(srgb, vec3(1.0 / 2.4)) * 1.055) - 0.055;
+            bvec3 selectParts = lessThan(srgb, vec3(0.0031308));
+            return mix(gammaRgb, linearRgb, selectParts);
+        }
+
+        vec3 linearRgbToSrgb(vec3 linear) {
             vec3 srgbLinear = linear / 12.92;
             vec3 srgbGamma = pow((linear + 0.055) / 1.055, vec3(2.4));
             bvec3 selectParts = lessThan(linear, vec3(0.04045));
-            return mix(srgbLinear, srgbGamma, selectParts);
+            return mix(srgbGamma, srgbLinear, selectParts);
+        }
+
+        vec3 linearRgbToOklab(vec3 linear)
+        {
+            vec3 lms = vec3(
+                dot(vec3(0.4121656120, 0.5362752080, 0.0514575653), linear),
+                dot(vec3(0.2118591070, 0.6807189584, 0.1074065790), linear),
+                dot(vec3(0.0883097947, 0.2818474174, 0.6302613616), linear)
+            );
+            vec3 lms_ = pow(lms, vec3(1.0 / 3.0));
+
+            return vec3(
+                dot(vec3(+0.2104542553, +0.7936177850, -0.0040720468), lms_),
+                dot(vec3(+1.9779984951, -2.4285922050, +0.4505937099), lms_),
+                dot(vec3(+0.0259040371, +0.7827717662, -0.8086757660), lms_)
+            );
+        }
+
+        vec3 oklabToLinearRgb(vec3 oklab)
+        {
+            // rgb = Lab
+            vec3 lms_ = vec3(
+                dot(vec3(+1.0, +0.3963377774, +0.2158037573), oklab),
+                dot(vec3(+1.0, -0.1055613458, -0.0638541728), oklab),
+                dot(vec3(+1.0, -0.0894841775, -1.2914855480), oklab)
+            );
+            vec3 lms = lms_ * lms_ * lms_;
+
+            return vec3(
+                dot(vec3(+4.0767245293, -3.3072168827, +0.2307590544), lms),
+                dot(vec3(-1.2681437731, +2.6093323231, -0.3411344290), lms),
+                dot(vec3(-0.0041119885, -0.7034763098, +1.7068625689), lms)
+            );
         }
 
         void main() {
             vec4 blurred = texture(uBlurredTexture, vUV);
-            blurred = vec4(linearToSrgb(blurred.rgb), 1.0);
+            blurred = vec4(linearRgbToSrgb(oklabToLinearRgb(blurred.rgb)), 1.0);
             vec4 composition = texture(uCompositionTexture, vUV);
 
             // First /64: screen coordinates -> texture coordinates (UV)
