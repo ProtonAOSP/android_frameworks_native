@@ -48,6 +48,7 @@ BlurFilter::BlurFilter(GLESRenderEngine& engine)
         mCompositionFbo(engine),
         mDitherFbo(engine),
         mMixProgram(engine),
+        mColorSpaceProgram(engine),
         mDownsampleProgram(engine),
         mUpsampleProgram(engine) {
     // Create VBO first for usage in shader VAOs
@@ -74,6 +75,12 @@ BlurFilter::BlurFilter(GLESRenderEngine& engine)
     mMDitherTextureLoc = mMixProgram.getUniformLocation("uDitherTexture");
     mMBlurOpacityLoc = mMixProgram.getUniformLocation("uBlurOpacity");
     createVertexArray(&mMVertexArray, mMPosLoc, mMUvLoc);
+
+    mColorSpaceProgram.compile(getVertexShader(), getColorSpaceFragShader());
+    mCPosLoc = mColorSpaceProgram.getAttributeLocation("aPosition");
+    mCUvLoc = mColorSpaceProgram.getAttributeLocation("aUV");
+    mCTextureLoc = mColorSpaceProgram.getUniformLocation("uTexture");
+    createVertexArray(&mCVertexArray, mCPosLoc, mCUvLoc);
 
     mDownsampleProgram.compile(getVertexShader(), getDownsampleFragShader());
     mDPosLoc = mDownsampleProgram.getAttributeLocation("aPosition");
@@ -125,7 +132,7 @@ status_t BlurFilter::prepareBuffers(const DisplaySettings& display) {
         fbo->allocateBuffers(sourceFboWidth >> i, sourceFboHeight >> i, nullptr,
                                 GL_LINEAR, GL_CLAMP_TO_EDGE,
                                 // 2-10-10-10 reversed is the only 10-bpc format in GLES 3.1
-                                GL_RGB10_A2, GL_RGBA, GL_UNSIGNED_INT_2_10_10_10_REV);
+                                GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT);
         if (fbo->getStatus() != GL_FRAMEBUFFER_COMPLETE) {
             ALOGE("Invalid pass buffer");
             return fbo->getStatus();
@@ -238,14 +245,14 @@ status_t BlurFilter::prepare() {
 
     glActiveTexture(GL_TEXTURE0);
 
+    // Convert from sRGB to linear color space
     GLFramebuffer* firstBuf = mPassFbos[0];
-    mCompositionFbo.bindAsReadBuffer();
-    firstBuf->bindAsDrawBuffer();
-    glBlitFramebuffer(0, 0,
-                      mCompositionFbo.getBufferWidth(), mCompositionFbo.getBufferHeight(),
-                      0, 0,
-                      firstBuf->getBufferWidth(), firstBuf->getBufferHeight(),
-                      GL_COLOR_BUFFER_BIT, GL_LINEAR);
+    mColorSpaceProgram.useProgram();
+    glViewport(0, 0, firstBuf->getBufferWidth(), firstBuf->getBufferHeight());
+    glBindTexture(GL_TEXTURE_2D, mCompositionFbo.getTextureName());
+    firstBuf->bind();
+    glUniform1i(mCTextureLoc, 0);
+    drawMesh(mCVertexArray);
 
     ALOGI("SARU: prepare - initial dims %dx%d", mPassFbos[0]->getBufferWidth(), mPassFbos[0]->getBufferHeight());
 
@@ -347,6 +354,30 @@ string BlurFilter::getVertexShader() const {
     )SHADER";
 }
 
+string BlurFilter::getColorSpaceFragShader() const {
+    return R"SHADER(
+        #version 310 es
+        precision mediump float;
+
+        uniform sampler2D uTexture;
+
+        in highp vec2 vUV;
+        out vec4 fragColor;
+
+        vec3 srgbToLinear(vec3 srgb) {
+            vec3 linearRgb = srgb * 12.92;
+            vec3 gammaRgb = (pow(srgb, vec3(1.0 / 2.4)) * 1.055) - 0.055;
+            bvec3 selectParts = lessThan(srgb, vec3(0.0031308));
+            return mix(linearRgb, gammaRgb, selectParts);
+        }
+
+        void main() {
+            vec3 linear = srgbToLinear(texture(uTexture, vUV).rgb);
+            fragColor = vec4(linear, 1.0);
+        }
+    )SHADER";
+}
+
 string BlurFilter::getDownsampleFragShader() const {
     return R"SHADER(
         #version 310 es
@@ -409,8 +440,16 @@ string BlurFilter::getMixFragShader() const {
         in highp vec2 vUV;
         out vec4 fragColor;
 
+        vec3 linearToSrgb(vec3 linear) {
+            vec3 srgbLinear = linear / 12.92;
+            vec3 srgbGamma = pow((linear + 0.055) / 1.055, vec3(2.4));
+            bvec3 selectParts = lessThan(linear, vec3(0.04045));
+            return mix(srgbLinear, srgbGamma, selectParts);
+        }
+
         void main() {
             vec4 blurred = texture(uBlurredTexture, vUV);
+            blurred = vec4(linearToSrgb(blurred.rgb), 1.0);
             vec4 composition = texture(uCompositionTexture, vUV);
 
             // First /64: screen coordinates -> texture coordinates (UV)
