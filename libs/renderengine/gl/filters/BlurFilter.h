@@ -35,7 +35,7 @@ namespace gl {
 class BlurFilter {
 public:
     // Downsample FBO to improve performance
-    static constexpr float kFboScale = 1.0f;
+    static constexpr float kFboScale = 0.2f;
     // We allocate FBOs for this many passes to avoid the overhead of dynamic allocation.
     // If you change this, be sure to update kOffsetRanges as well.
     static constexpr uint32_t kMaxPasses = 5;
