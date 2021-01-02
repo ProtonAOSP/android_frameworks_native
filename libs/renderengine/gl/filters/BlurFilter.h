@@ -65,7 +65,6 @@ private:
     void renderPass(GLFramebuffer* read, GLFramebuffer* draw, GLuint halfPixel, GLuint vertexArray);
 
     string getVertexShader() const;
-    string getColorSpaceFragShader() const;
     string getDownsampleFragShader() const;
     string getUpsampleFragShader() const;
     string getMixFragShader() const;
@@ -96,12 +95,6 @@ private:
     GLuint mMBlurredTextureLoc;
     GLuint mMDitherTextureLoc;
     GLuint mMVertexArray;
-
-    GenericProgram mColorSpaceProgram;
-    GLuint mCPosLoc;
-    GLuint mCUvLoc;
-    GLuint mCTextureLoc;
-    GLuint mCVertexArray;
 
     GenericProgram mDownsampleProgram;
     GLuint mDPosLoc;
