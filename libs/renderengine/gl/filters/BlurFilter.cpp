@@ -51,20 +51,27 @@ BlurFilter::BlurFilter(GLESRenderEngine& engine)
         mDownsampleProgram(engine),
         mUpsampleProgram(engine) {
     // Create VBO first for usage in shader VAOs
-    static constexpr auto size = 2.0f;
-    static constexpr auto translation = 1.0f;
-    // This represents the rectangular display with a single oversized triangle.
     const GLfloat vboData[] = {
         // Vertex data
-        translation - size, -translation - size,
-        translation - size, -translation + size,
-        translation + size, -translation + size,
+         1.0f,  1.0f,  // top right
+         1.0f, -1.0f,  // bottom right
+        -1.0f, -1.0f,  // bottom left
+        -1.0f,  1.0f,   // top left 
         // UV data
-        0.0f, 0.0f - translation,
-        0.0f, size - translation,
-        size, size - translation
+        1.0f, 1.0f,
+        1.0f, 0.0f,
+        0.0f, 0.0f,
+        0.0f, 1.0f,
     };
-    mMeshBuffer.allocateBuffers(vboData, 12 /* size */);
+    mMeshBuffer.allocateBuffers(vboData, 16 /* size */);
+
+    const GLuint indices[] = {  // note that we start from 0!
+        0, 1, 3,   // first triangle
+        1, 2, 3    // second triangle
+    };
+    glGenBuffers(1, &mElementBuffer);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mElementBuffer);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
 
     mMixProgram.compile(getVertexShader(), getMixFragShader());
     mMPosLoc = mMixProgram.getAttributeLocation("aPosition");
@@ -94,6 +101,23 @@ BlurFilter::BlurFilter(GLESRenderEngine& engine)
     mDitherFbo.allocateBuffers(64, 64, (void *) kBlurNoisePattern,
                                GL_NEAREST, GL_REPEAT,
                                GL_RGB, GL_RGB, GL_UNSIGNED_BYTE);
+}
+
+void BlurFilter::createVertexArray(GLuint* vertexArray, GLuint position, GLuint uv) {
+    glGenVertexArrays(1, vertexArray);
+    glBindVertexArray(*vertexArray);
+    mMeshBuffer.bind();
+
+    glEnableVertexAttribArray(position);
+    glVertexAttribPointer(position, 2 /* size */, GL_FLOAT, GL_FALSE,
+                          2 * sizeof(GLfloat) /* stride */, 0 /* offset */);
+
+    glEnableVertexAttribArray(uv);
+    glVertexAttribPointer(uv, 2 /* size */, GL_FLOAT, GL_FALSE, 0 /* stride */,
+                          (GLvoid*)(8 * sizeof(GLfloat)) /* offset */);
+
+    mMeshBuffer.unbind();
+    glBindVertexArray(0);
 }
 
 status_t BlurFilter::prepareBuffers(const DisplaySettings& display) {
@@ -194,26 +218,11 @@ std::tuple<int32_t, float> BlurFilter::convertGaussianRadius(uint32_t radius) {
     return {1, radius * kFboScale / std::pow(2, 1)};
 }
 
-void BlurFilter::createVertexArray(GLuint* vertexArray, GLuint position, GLuint uv) {
-    glGenVertexArrays(1, vertexArray);
-    glBindVertexArray(*vertexArray);
-    mMeshBuffer.bind();
-
-    glEnableVertexAttribArray(position);
-    glVertexAttribPointer(position, 2 /* size */, GL_FLOAT, GL_FALSE,
-                          2 * sizeof(GLfloat) /* stride */, 0 /* offset */);
-
-    glEnableVertexAttribArray(uv);
-    glVertexAttribPointer(uv, 2 /* size */, GL_FLOAT, GL_FALSE, 0 /* stride */,
-                          (GLvoid*)(6 * sizeof(GLfloat)) /* offset */);
-
-    mMeshBuffer.unbind();
-    glBindVertexArray(0);
-}
-
 void BlurFilter::drawMesh(GLuint vertexArray) {
     glBindVertexArray(vertexArray);
-    glDrawArrays(GL_TRIANGLES, 0 /* first */, 3 /* vertices */);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mElementBuffer);
+    glDrawElements(GL_TRIANGLES, 6 /* vertices */, GL_UNSIGNED_INT, 0);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
     glBindVertexArray(0);
 }
 
@@ -332,11 +341,11 @@ status_t BlurFilter::render(bool /*multiPass*/) {
 string BlurFilter::getVertexShader() const {
     return R"SHADER(
         #version 310 es
-        precision mediump float;
+        precision highp float;
 
         in vec2 aPosition;
-        in highp vec2 aUV;
-        out highp vec2 vUV;
+        in vec2 aUV;
+        out vec2 vUV;
 
         void main() {
             vUV = aUV;
@@ -348,13 +357,13 @@ string BlurFilter::getVertexShader() const {
 string BlurFilter::getDownsampleFragShader() const {
     return R"SHADER(
         #version 310 es
-        precision mediump float;
+        precision highp float;
 
         uniform sampler2D uTexture;
         uniform float uOffset;
         uniform vec2 uHalfPixel;
 
-        in highp vec2 vUV;
+        in vec2 vUV;
         out vec4 fragColor;
 
         void main() {
@@ -371,13 +380,13 @@ string BlurFilter::getDownsampleFragShader() const {
 string BlurFilter::getUpsampleFragShader() const {
     return R"SHADER(
         #version 310 es
-        precision mediump float;
+        precision highp float;
 
         uniform sampler2D uTexture;
         uniform float uOffset;
         uniform vec2 uHalfPixel;
 
-        in highp vec2 vUV;
+        in vec2 vUV;
         out vec4 fragColor;
 
         void main() {
@@ -397,14 +406,14 @@ string BlurFilter::getUpsampleFragShader() const {
 string BlurFilter::getMixFragShader() const {
     return R"SHADER(
         #version 310 es
-        precision mediump float;
+        precision highp float;
 
         uniform sampler2D uCompositionTexture;
         uniform sampler2D uBlurredTexture;
         uniform sampler2D uDitherTexture;
         uniform float uBlurOpacity;
 
-        in highp vec2 vUV;
+        in vec2 vUV;
         out vec4 fragColor;
 
         void main() {
