@@ -238,13 +238,14 @@ status_t BlurFilter::prepare() {
 
     glActiveTexture(GL_TEXTURE0);
 
-    GLFramebuffer* firstBuf = mPassFbos[0];
-    mCompositionFbo.bindAsReadBuffer();
-    firstBuf->bindAsDrawBuffer();
+    GLFramebuffer* read = &mCompositionFbo;
+    GLFramebuffer* draw = mPassFbos[0];
+    read->bindAsReadBuffer();
+    draw->bindAsDrawBuffer();
     glBlitFramebuffer(0, 0,
-                      mCompositionFbo.getBufferWidth(), mCompositionFbo.getBufferHeight(),
+                      read->getBufferWidth(), read->getBufferHeight(),
                       0, 0,
-                      firstBuf->getBufferWidth(), firstBuf->getBufferHeight(),
+                      draw->getBufferWidth(), draw->getBufferHeight(),
                       GL_COLOR_BUFFER_BIT, GL_LINEAR);
 
     ALOGI("SARU: prepare - initial dims %dx%d", mPassFbos[0]->getBufferWidth(), mPassFbos[0]->getBufferHeight());
@@ -253,9 +254,6 @@ status_t BlurFilter::prepare() {
     mDownsampleProgram.useProgram();
     glUniform1i(mDTextureLoc, 0);
     glUniform1f(mDOffsetLoc, mOffset);
-
-    GLFramebuffer* read;
-    GLFramebuffer* draw;
 
     // Downsample
     for (auto i = 0; i < mPasses; i++) {
