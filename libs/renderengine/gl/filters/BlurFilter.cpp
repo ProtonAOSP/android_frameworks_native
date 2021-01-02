@@ -29,6 +29,9 @@
 
 #include <utils/Trace.h>
 
+#define TINYEXR_IMPLEMENTATION
+#include "tinyexr.h"
+
 // Minimum and maximum sampling offsets for each pass count, determined empirically.
 // Too low: bilinear downsampling artifacts
 // Too high: diagonal sampling artifacts
@@ -42,39 +45,6 @@ static const std::vector<std::tuple<float, float>> kOffsetRanges = {
 };
 
 static uint64_t frames = 0;
-
-#pragma pack(push, 1)
-struct BITMAPFILEHEADER {
-    uint16_t bfType;
-    uint32_t bfSize;
-    uint16_t bfReserved1;
-    uint16_t bfReserved2;
-    uint32_t bfOffBits;
-};
-
-struct BITMAPV4HEADER {
-    uint32_t biSize;
-    int32_t  biWidth;
-    int32_t  biHeight;
-    uint16_t biPlanes;
-    uint16_t biBitCount;
-    uint32_t biCompression;
-    uint32_t biSizeImage;
-    int32_t  biXPelsPerMeter;
-    int32_t  biYPelsPerMeter;
-    uint32_t biClrUsed;
-    uint32_t biClrImportant;
-    uint32_t biRedMask;
-    uint32_t biGreenMask;
-    uint32_t biBlueMask;
-    uint32_t biAlphaMask;
-    uint32_t biColorSpace;
-    uint8_t cieXyzPoints[0x24];
-    uint32_t biRedGamma;
-    uint32_t biGreenGamma;
-    uint32_t biBlueGamma;
-};
-#pragma pack(pop)
 
 namespace android {
 namespace renderengine {
@@ -161,8 +131,7 @@ status_t BlurFilter::prepareBuffers(const DisplaySettings& display) {
 
         fbo->allocateBuffers(sourceFboWidth >> i, sourceFboHeight >> i, nullptr,
                                 GL_LINEAR, GL_CLAMP_TO_EDGE,
-                                // 2-10-10-10 reversed is the only 10-bpc format in GLES 3.1
-                                GL_RGB10_A2, GL_RGBA, GL_UNSIGNED_INT_2_10_10_10_REV);
+                                GL_RGBA32F, GL_RGBA, GL_FLOAT);
         if (fbo->getStatus() != GL_FRAMEBUFFER_COMPLETE) {
             ALOGE("Invalid pass buffer");
             return fbo->getStatus();
@@ -364,44 +333,67 @@ status_t BlurFilter::render(bool /*multiPass*/) {
         ALOGI("SARU: dumping blur fb @ frame=%llu", (unsigned long long) frames);
         int32_t width = mLastDrawTarget->getBufferWidth();
         int32_t height = mLastDrawTarget->getBufferHeight();
-        size_t bufSize = width * height * 4;
-        char *buf = (char *) malloc(bufSize);
+        size_t bufSize = width * height * 4 * sizeof(float);
+        float *buf = (float *) malloc(bufSize);
         mLastDrawTarget->bindAsReadBuffer();
         mLastDrawTarget->bind();
-        glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_INT_2_10_10_10_REV, (void *) buf);
+        glReadPixels(0, 0, width, height, GL_RGBA, GL_FLOAT, (void *) buf);
 
-        struct BITMAPFILEHEADER fileHeader = {
-            .bfType = 0x4d42,
-            .bfSize = (uint32_t) (sizeof(struct BITMAPFILEHEADER) + sizeof(struct BITMAPV4HEADER) + bufSize),
-            .bfOffBits = sizeof(struct BITMAPFILEHEADER) + sizeof(struct BITMAPV4HEADER),
-        };
+        EXRHeader header;
+        InitEXRHeader(&header);
 
-        struct BITMAPV4HEADER dibHeader = {
-            .biSize = sizeof(struct BITMAPV4HEADER), // -4?
-            .biWidth = width,
-            .biHeight = -height,
-            .biPlanes = 1,
-            .biBitCount = 32,
-            .biCompression = 3,
-            .biSizeImage = (uint32_t) bufSize,
-            .biXPelsPerMeter = 7339,
-            .biYPelsPerMeter = 7339,
-            .biClrUsed = 0,
-            .biClrImportant = 0,
-            .biBlueMask =   0b00111111111100000000000000000000,
-            .biGreenMask =  0b00000000000011111111110000000000,
-            .biRedMask =    0b00000000000000000000001111111111,
-            .biAlphaMask =  0b00000000000000000000000000000000,
-            .biColorSpace = 0x73524742,
-        };
+        EXRImage image;
+        InitEXRImage(&image);
 
-        std::ofstream file("/dev/blur.bmp", ios::out | ios::binary | ios::trunc);
-        file.write((char *) &fileHeader, sizeof(fileHeader));
-        file.write((char *) &dibHeader, sizeof(dibHeader));
-        file.write(buf, bufSize);
-        file.close();
+        image.num_channels = 3;
+
+        std::vector<float> images[3];
+        images[0].resize(width * height);
+        images[1].resize(width * height);
+        images[2].resize(width * height);
+
+        // Split RGBRGBRGB... into R, G and B layer
+        for (int i = 0; i < width * height; i++) {
+            images[0][i] = buf[4*i+0];
+            images[1][i] = buf[4*i+1];
+            images[2][i] = buf[4*i+2];
+        }
+
+        float* image_ptr[3];
+        image_ptr[0] = &(images[2].at(0)); // B
+        image_ptr[1] = &(images[1].at(0)); // G
+        image_ptr[2] = &(images[0].at(0)); // R
+
+        image.images = (unsigned char**)image_ptr;
+        image.width = width;
+        image.height = height;
+
+        header.num_channels = 3;
+        header.channels = (EXRChannelInfo *)malloc(sizeof(EXRChannelInfo) * header.num_channels);
+        // Must be (A)BGR order, since most of EXR viewers expect this channel order.
+        strncpy(header.channels[0].name, "B", 255); header.channels[0].name[strlen("B")] = '\0';
+        strncpy(header.channels[1].name, "G", 255); header.channels[1].name[strlen("G")] = '\0';
+        strncpy(header.channels[2].name, "R", 255); header.channels[2].name[strlen("R")] = '\0';
+
+        header.pixel_types = (int *)malloc(sizeof(int) * header.num_channels);
+        header.requested_pixel_types = (int *)malloc(sizeof(int) * header.num_channels);
+        for (int i = 0; i < header.num_channels; i++) {
+            header.pixel_types[i] = TINYEXR_PIXELTYPE_FLOAT; // pixel type of input image
+            header.requested_pixel_types[i] = TINYEXR_PIXELTYPE_FLOAT; // pixel type of output image to be stored in .EXR
+        }
+
+        const char* err = nullptr; // or nullptr in C++11 or later.
+        int ret = SaveEXRImageToFile(&image, &header, "/dev/blur.exr", &err);
+        if (ret != TINYEXR_SUCCESS) {
+            ALOGE("SARU: Save EXR err: %s", err);
+            FreeEXRErrorMessage(err); // free's buffer for an error message
+        }
 
         free(buf);
+
+        free(header.channels);
+        free(header.pixel_types);
+        free(header.requested_pixel_types);
     }
 
     // Clean up to avoid breaking further composition
