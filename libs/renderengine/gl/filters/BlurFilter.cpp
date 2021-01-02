@@ -24,6 +24,8 @@
 #include <GLES3/gl3ext.h>
 #include <ui/GraphicTypes.h>
 #include <cstdint>
+#include <iostream>
+#include <fstream>
 
 #include <utils/Trace.h>
 
@@ -38,6 +40,41 @@ static const std::vector<std::tuple<float, float>> kOffsetRanges = {
     {2.00, 20.00}, // pass 5
     /* limited by kMaxPasses */
 };
+
+static uint64_t frames = 0;
+
+#pragma pack(push, 1)
+struct BITMAPFILEHEADER {
+    uint16_t bfType;
+    uint32_t bfSize;
+    uint16_t bfReserved1;
+    uint16_t bfReserved2;
+    uint32_t bfOffBits;
+};
+
+struct BITMAPV4HEADER {
+    uint32_t biSize;
+    int32_t  biWidth;
+    int32_t  biHeight;
+    uint16_t biPlanes;
+    uint16_t biBitCount;
+    uint32_t biCompression;
+    uint32_t biSizeImage;
+    int32_t  biXPelsPerMeter;
+    int32_t  biYPelsPerMeter;
+    uint32_t biClrUsed;
+    uint32_t biClrImportant;
+    uint32_t biRedMask;
+    uint32_t biGreenMask;
+    uint32_t biBlueMask;
+    uint32_t biAlphaMask;
+    uint32_t biColorSpace;
+    uint8_t cieXyzPoints[0x24];
+    uint32_t biRedGamma;
+    uint32_t biGreenGamma;
+    uint32_t biBlueGamma;
+};
+#pragma pack(pop)
 
 namespace android {
 namespace renderengine {
@@ -322,6 +359,51 @@ status_t BlurFilter::render(bool /*multiPass*/) {
 
     drawMesh(mMVertexArray);
 
+    frames++;
+    if (frames % 90 == 0) {
+        ALOGI("SARU: dumping blur fb @ frame=%llu", (unsigned long long) frames);
+        int32_t width = mLastDrawTarget->getBufferWidth();
+        int32_t height = mLastDrawTarget->getBufferHeight();
+        size_t bufSize = width * height * 4;
+        char *buf = (char *) malloc(bufSize);
+        mLastDrawTarget->bindAsReadBuffer();
+        mLastDrawTarget->bind();
+        glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_INT_2_10_10_10_REV, (void *) buf);
+
+        struct BITMAPFILEHEADER fileHeader = {
+            .bfType = 0x4d42,
+            .bfSize = (uint32_t) (sizeof(struct BITMAPFILEHEADER) + sizeof(struct BITMAPV4HEADER) + bufSize),
+            .bfOffBits = sizeof(struct BITMAPFILEHEADER) + sizeof(struct BITMAPV4HEADER),
+        };
+
+        struct BITMAPV4HEADER dibHeader = {
+            .biSize = sizeof(struct BITMAPV4HEADER), // -4?
+            .biWidth = width,
+            .biHeight = -height,
+            .biPlanes = 1,
+            .biBitCount = 32,
+            .biCompression = 3,
+            .biSizeImage = (uint32_t) bufSize,
+            .biXPelsPerMeter = 7339,
+            .biYPelsPerMeter = 7339,
+            .biClrUsed = 0,
+            .biClrImportant = 0,
+            .biBlueMask =   0b00111111111100000000000000000000,
+            .biGreenMask =  0b00000000000011111111110000000000,
+            .biRedMask =    0b00000000000000000000001111111111,
+            .biAlphaMask =  0b00000000000000000000000000000000,
+            .biColorSpace = 0x73524742,
+        };
+
+        std::ofstream file("/dev/blur.bmp", ios::out | ios::binary | ios::trunc);
+        file.write((char *) &fileHeader, sizeof(fileHeader));
+        file.write((char *) &dibHeader, sizeof(dibHeader));
+        file.write(buf, bufSize);
+        file.close();
+
+        free(buf);
+    }
+
     // Clean up to avoid breaking further composition
     glUseProgram(0);
     glActiveTexture(GL_TEXTURE0);
@@ -358,12 +440,12 @@ string BlurFilter::getDownsampleFragShader() const {
         out vec4 fragColor;
 
         void main() {
-            vec4 sum = texture(uTexture, vUV) * 4.0;
-            sum += texture(uTexture, vUV - uHalfPixel.xy * uOffset);
-            sum += texture(uTexture, vUV + uHalfPixel.xy * uOffset);
-            sum += texture(uTexture, vUV + vec2(uHalfPixel.x, -uHalfPixel.y) * uOffset);
-            sum += texture(uTexture, vUV - vec2(uHalfPixel.x, -uHalfPixel.y) * uOffset);
-            fragColor = sum / 8.0;
+            vec3 sum = texture(uTexture, vUV).rgb * 4.0;
+            sum += texture(uTexture, vUV - uHalfPixel.xy * uOffset).rgb;
+            sum += texture(uTexture, vUV + uHalfPixel.xy * uOffset).rgb;
+            sum += texture(uTexture, vUV + vec2(uHalfPixel.x, -uHalfPixel.y) * uOffset).rgb;
+            sum += texture(uTexture, vUV - vec2(uHalfPixel.x, -uHalfPixel.y) * uOffset).rgb;
+            fragColor = vec4(sum / 8.0, 1.0);
         }
     )SHADER";
 }
@@ -381,15 +463,15 @@ string BlurFilter::getUpsampleFragShader() const {
         out vec4 fragColor;
 
         void main() {
-            vec4 sum = texture(uTexture, vUV + vec2(-uHalfPixel.x * 2.0, 0.0) * uOffset);
-            sum += texture(uTexture, vUV + vec2(-uHalfPixel.x, uHalfPixel.y) * uOffset) * 2.0;
-            sum += texture(uTexture, vUV + vec2(0.0, uHalfPixel.y * 2.0) * uOffset);
-            sum += texture(uTexture, vUV + vec2(uHalfPixel.x, uHalfPixel.y) * uOffset) * 2.0;
-            sum += texture(uTexture, vUV + vec2(uHalfPixel.x * 2.0, 0.0) * uOffset);
-            sum += texture(uTexture, vUV + vec2(uHalfPixel.x, -uHalfPixel.y) * uOffset) * 2.0;
-            sum += texture(uTexture, vUV + vec2(0.0, -uHalfPixel.y * 2.0) * uOffset);
-            sum += texture(uTexture, vUV + vec2(-uHalfPixel.x, -uHalfPixel.y) * uOffset) * 2.0;
-            fragColor = sum / 12.0;
+            vec3 sum = texture(uTexture, vUV + vec2(-uHalfPixel.x * 2.0, 0.0) * uOffset).rgb;
+            sum += texture(uTexture, vUV + vec2(-uHalfPixel.x, uHalfPixel.y) * uOffset).rgb * 2.0;
+            sum += texture(uTexture, vUV + vec2(0.0, uHalfPixel.y * 2.0) * uOffset).rgb;
+            sum += texture(uTexture, vUV + vec2(uHalfPixel.x, uHalfPixel.y) * uOffset).rgb * 2.0;
+            sum += texture(uTexture, vUV + vec2(uHalfPixel.x * 2.0, 0.0) * uOffset).rgb;
+            sum += texture(uTexture, vUV + vec2(uHalfPixel.x, -uHalfPixel.y) * uOffset).rgb * 2.0;
+            sum += texture(uTexture, vUV + vec2(0.0, -uHalfPixel.y * 2.0) * uOffset).rgb;
+            sum += texture(uTexture, vUV + vec2(-uHalfPixel.x, -uHalfPixel.y) * uOffset).rgb * 2.0;
+            fragColor = vec4(sum / 12.0, 1.0);
         }
     )SHADER";
 }
