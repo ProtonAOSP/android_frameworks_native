@@ -341,7 +341,7 @@ status_t BlurFilter::render(bool /*multiPass*/) {
 string BlurFilter::getVertexShader() const {
     return R"SHADER(
         #version 310 es
-        precision highp float;
+        precision mediump float;
 
         in vec2 aPosition;
         in highp vec2 aUV;
@@ -357,7 +357,7 @@ string BlurFilter::getVertexShader() const {
 string BlurFilter::getColorSpaceFragShader() const {
     return R"SHADER(
         #version 310 es
-        precision highp float;
+        precision mediump float;
 
         uniform sampler2D uTexture;
 
@@ -378,70 +378,43 @@ string BlurFilter::getColorSpaceFragShader() const {
             return mix(srgbGamma, srgbLinear, selectParts);
         }
 
-        vec3 linearRgbToXyz(vec3 rgb) {
-            return vec3(
-                dot(vec3(41.23865632529916,  35.75914909206253,  18.045049120356364), rgb),
-                dot(vec3(21.26368216773238,  71.51829818412506,   7.218019648142546), rgb),
-                dot(vec3(1.9330620152483982, 11.919716364020843, 95.03725870054352), rgb)
-            );
-        }
-
-        vec3 xyzToLinearRgb(vec3 xyz) {
-            return vec3(
-                dot(vec3(+0.03241003232976359  , -0.015373989694887858, -0.004986158819963629  ), xyz),
-                dot(vec3(-0.009692242522025166 , +0.01875929983695176 , +0.00041554226340084706), xyz),
-                dot(vec3(+0.0005563941985197545, -0.0020401120612391  , +0.010571489771875336 ), xyz)
-            );
-        }
-
-        vec3 perceptualQuantizer(vec3 x) {
-            vec3 xx = pow(x * 1e-4, vec3(0.1593017578125));
-            return pow((vec3(0.8359375) + 18.8515625 * xx) / (vec3(1.0) + 18.6875 * xx), vec3(134.034375));
-        }
-
-        vec3 xyzToJzazbz(vec3 xyz)
+        vec3 linearRgbToOklab(vec3 linear)
         {
-            vec3 LMSp = perceptualQuantizer(vec3(
-                dot(vec3(+0.674207838, +0.382799340, -0.047570458), xyz),
-                dot(vec3(+0.149284160, +0.739628340, +0.083327300), xyz),
-                dot(vec3(+0.070941080, +0.174768000, +0.670970020), xyz)
-            ));
+            vec3 lms = vec3(
+                dot(vec3(0.4121656120, 0.5362752080, 0.0514575653), linear),
+                dot(vec3(0.2118591070, 0.6807189584, 0.1074065790), linear),
+                dot(vec3(0.0883097947, 0.2818474174, 0.6302613616), linear)
+            );
+            vec3 lms_ = pow(lms, vec3(1.0 / 3.0));
 
-            float Iz = 0.5 * (LMSp.x + LMSp.y);
             return vec3(
-                (0.44 * Iz) / (1.0 - 0.56*Iz) - 1.6295499532821566e-11,
-                dot(vec3(+3.524000, -4.066708, +0.542708), LMSp),
-                dot(vec3(+0.199076, +1.096799, -1.295875), LMSp)
+                dot(vec3(+0.2104542553, +0.7936177850, -0.0040720468), lms_),
+                dot(vec3(+1.9779984951, -2.4285922050, +0.4505937099), lms_),
+                dot(vec3(+0.0259040371, +0.7827717662, -0.8086757660), lms_)
             );
         }
 
-        vec3 perceptualQuantizerInverse(vec3 x) {
-            vec3 xx = pow(x, vec3(7.460772656268214e-03));
-            return 1e4 * pow((vec3(0.8359375) - xx) / (18.6875*xx - vec3(18.8515625)), vec3(6.277394636015326));
-        }
-
-        vec3 jzazbzToXyz(vec3 jzazbz)
+        vec3 oklabToLinearRgb(vec3 oklab)
         {
-            float Jz = jzazbz.x + 1.6295499532821566e-11;
-            float Iz = Jz / (0.44 + 0.56*Jz);
-            vec3 Izazbz = vec3(Iz, jzazbz.yz);
-            vec3 LMS = perceptualQuantizerInverse(vec3(
-                dot(vec3(+1.0, +1.386050432715393e-1, +5.804731615611869e-2), Izazbz),
-                dot(vec3(+1.0, -1.386050432715393e-1, -5.804731615611891e-2), Izazbz),
-                dot(vec3(+1.0, -9.601924202631895e-2, -8.118918960560390e-1), Izazbz)
-            ));
+            // rgb = Lab
+            vec3 lms_ = vec3(
+                dot(vec3(+1.0, +0.3963377774, +0.2158037573), oklab),
+                dot(vec3(+1.0, -0.1055613458, -0.0638541728), oklab),
+                dot(vec3(+1.0, -0.0894841775, -1.2914855480), oklab)
+            );
+            vec3 lms = lms_ * lms_ * lms_;
 
             return vec3(
-                dot(vec3(+1.661373055774069e+00, -9.145230923250668e-01, +2.313620767186147e-01), LMS),
-                dot(vec3(-3.250758740427037e-01, +1.571847038366936e+00, -2.182538318672940e-01), LMS),
-                dot(vec3(-9.098281098284756e-02, -3.127282905230740e-01, +1.522766561305260e+00), LMS)
+                dot(vec3(+4.0767245293, -3.3072168827, +0.2307590544), lms),
+                dot(vec3(-1.2681437731, +2.6093323231, -0.3411344290), lms),
+                dot(vec3(-0.0041119885, -0.7034763098, +1.7068625689), lms)
             );
         }
 
         void main() {
             vec3 linear = srgbToLinearRgb(texture(uTexture, vUV).rgb);
-            vec3 jzazbz = xyzToJzazbz(linearRgbToXyz(linear));
-            fragColor = vec4(jzazbz, 1.0);
+            vec3 oklab = linearRgbToOklab(linear);
+            fragColor = vec4(oklab, 1.0);
         }
     )SHADER";
 }
@@ -449,7 +422,7 @@ string BlurFilter::getColorSpaceFragShader() const {
 string BlurFilter::getDownsampleFragShader() const {
     return R"SHADER(
         #version 310 es
-        precision highp float;
+        precision mediump float;
 
         uniform sampler2D uTexture;
         uniform float uOffset;
@@ -472,7 +445,7 @@ string BlurFilter::getDownsampleFragShader() const {
 string BlurFilter::getUpsampleFragShader() const {
     return R"SHADER(
         #version 310 es
-        precision highp float;
+        precision mediump float;
 
         uniform sampler2D uTexture;
         uniform float uOffset;
@@ -498,7 +471,7 @@ string BlurFilter::getUpsampleFragShader() const {
 string BlurFilter::getMixFragShader() const {
     return R"SHADER(
         #version 310 es
-        precision highp float;
+        precision mediump float;
 
         uniform sampler2D uCompositionTexture;
         uniform sampler2D uBlurredTexture;
@@ -522,69 +495,42 @@ string BlurFilter::getMixFragShader() const {
             return mix(srgbGamma, srgbLinear, selectParts);
         }
 
-        vec3 linearRgbToXyz(vec3 rgb) {
-            return vec3(
-                dot(vec3(41.23865632529916,  35.75914909206253,  18.045049120356364), rgb),
-                dot(vec3(21.26368216773238,  71.51829818412506,   7.218019648142546), rgb),
-                dot(vec3(1.9330620152483982, 11.919716364020843, 95.03725870054352), rgb)
-            );
-        }
-
-        vec3 xyzToLinearRgb(vec3 xyz) {
-            return vec3(
-                dot(vec3(+0.03241003232976359  , -0.015373989694887858, -0.004986158819963629  ), xyz),
-                dot(vec3(-0.009692242522025166 , +0.01875929983695176 , +0.00041554226340084706), xyz),
-                dot(vec3(+0.0005563941985197545, -0.0020401120612391  , +0.010571489771875336 ), xyz)
-            );
-        }
-
-        vec3 perceptualQuantizer(vec3 x) {
-            vec3 xx = pow(x * 1e-4, vec3(0.1593017578125));
-            return pow((vec3(0.8359375) + 18.8515625 * xx) / (vec3(1.0) + 18.6875 * xx), vec3(134.034375));
-        }
-
-        vec3 xyzToJzazbz(vec3 xyz)
+        vec3 linearRgbToOklab(vec3 linear)
         {
-            vec3 LMSp = perceptualQuantizer(vec3(
-                dot(vec3(+0.674207838, +0.382799340, -0.047570458), xyz),
-                dot(vec3(+0.149284160, +0.739628340, +0.083327300), xyz),
-                dot(vec3(+0.070941080, +0.174768000, +0.670970020), xyz)
-            ));
+            vec3 lms = vec3(
+                dot(vec3(0.4121656120, 0.5362752080, 0.0514575653), linear),
+                dot(vec3(0.2118591070, 0.6807189584, 0.1074065790), linear),
+                dot(vec3(0.0883097947, 0.2818474174, 0.6302613616), linear)
+            );
+            vec3 lms_ = pow(lms, vec3(1.0 / 3.0));
 
-            float Iz = 0.5 * (LMSp.x + LMSp.y);
             return vec3(
-                (0.44 * Iz) / (1.0 - 0.56*Iz) - 1.6295499532821566e-11,
-                dot(vec3(+3.524000, -4.066708, +0.542708), LMSp),
-                dot(vec3(+0.199076, +1.096799, -1.295875), LMSp)
+                dot(vec3(+0.2104542553, +0.7936177850, -0.0040720468), lms_),
+                dot(vec3(+1.9779984951, -2.4285922050, +0.4505937099), lms_),
+                dot(vec3(+0.0259040371, +0.7827717662, -0.8086757660), lms_)
             );
         }
 
-        vec3 perceptualQuantizerInverse(vec3 x) {
-            vec3 xx = pow(x, vec3(7.460772656268214e-03));
-            return 1e4 * pow((vec3(0.8359375) - xx) / (18.6875*xx - vec3(18.8515625)), vec3(6.277394636015326));
-        }
-
-        vec3 jzazbzToXyz(vec3 jzazbz)
+        vec3 oklabToLinearRgb(vec3 oklab)
         {
-            float Jz = jzazbz.x + 1.6295499532821566e-11;
-            float Iz = Jz / (0.44 + 0.56*Jz);
-            vec3 Izazbz = vec3(Iz, jzazbz.yz);
-            vec3 LMS = perceptualQuantizerInverse(vec3(
-                dot(vec3(+1.0, +1.386050432715393e-1, +5.804731615611869e-2), Izazbz),
-                dot(vec3(+1.0, -1.386050432715393e-1, -5.804731615611891e-2), Izazbz),
-                dot(vec3(+1.0, -9.601924202631895e-2, -8.118918960560390e-1), Izazbz)
-            ));
+            // rgb = Lab
+            vec3 lms_ = vec3(
+                dot(vec3(+1.0, +0.3963377774, +0.2158037573), oklab),
+                dot(vec3(+1.0, -0.1055613458, -0.0638541728), oklab),
+                dot(vec3(+1.0, -0.0894841775, -1.2914855480), oklab)
+            );
+            vec3 lms = lms_ * lms_ * lms_;
 
             return vec3(
-                dot(vec3(+1.661373055774069e+00, -9.145230923250668e-01, +2.313620767186147e-01), LMS),
-                dot(vec3(-3.250758740427037e-01, +1.571847038366936e+00, -2.182538318672940e-01), LMS),
-                dot(vec3(-9.098281098284756e-02, -3.127282905230740e-01, +1.522766561305260e+00), LMS)
+                dot(vec3(+4.0767245293, -3.3072168827, +0.2307590544), lms),
+                dot(vec3(-1.2681437731, +2.6093323231, -0.3411344290), lms),
+                dot(vec3(-0.0041119885, -0.7034763098, +1.7068625689), lms)
             );
         }
 
         void main() {
             vec4 blurred = texture(uBlurredTexture, vUV);
-            blurred = vec4(linearRgbToSrgb(xyzToLinearRgb(jzazbzToXyz(blurred.rgb))), 1.0);
+            blurred = vec4(linearRgbToSrgb(oklabToLinearRgb(blurred.rgb)), 1.0);
             vec4 composition = texture(uCompositionTexture, vUV);
 
             // First /64: screen coordinates -> texture coordinates (UV)
