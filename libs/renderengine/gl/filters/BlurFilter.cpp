@@ -184,14 +184,14 @@ std::tuple<int32_t, float> BlurFilter::convertGaussianRadius(uint32_t radius) {
     // Test each pass level first
     for (auto i = 0; i < kMaxPasses; i++) {
         auto [minOffset, maxOffset] = kOffsetRanges[i];
-        float offset = radius * kFboScale * 0.75 / std::pow(2, i + 1);
+        float offset = radius * kFboScale / std::pow(2, i + 1);
         if (offset >= minOffset && offset <= maxOffset) {
             return {i + 1, offset};
         }
     }
 
     // FIXME: handle minmax properly
-    return {1, radius * kFboScale * 0.75 / std::pow(2, 1)};
+    return {1, radius * kFboScale / std::pow(2, 1)};
 }
 
 void BlurFilter::createVertexArray(GLuint* vertexArray, GLuint position, GLuint uv) {
@@ -229,7 +229,7 @@ void BlurFilter::renderPass(GLFramebuffer* read, GLFramebuffer* draw, GLuint hal
 
     // 1/2 pixel offset in texture coordinate (UV) space
     // Note that this is different from NDC!
-    glUniform2f(halfPixelLoc, 0.5 / read->getBufferWidth(), 0.5 / read->getBufferHeight());
+    glUniform2f(halfPixelLoc, 0.5 / targetWidth, 0.5 / targetHeight);
     drawMesh(vertexArray);
 }
 
