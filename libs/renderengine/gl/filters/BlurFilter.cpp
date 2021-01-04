@@ -103,7 +103,7 @@ BlurFilter::BlurFilter(GLESRenderEngine& engine)
 
     mDitherFbo.allocateBuffers(64, 64, (void *) kBlurNoisePattern,
                                GL_NEAREST, GL_REPEAT,
-                               GL_RGB, GL_RGB, GL_UNSIGNED_BYTE);
+                               GL_RGB16F, GL_RGB, GL_HALF_FLOAT);
 }
 
 status_t BlurFilter::prepareBuffers(const DisplaySettings& display) {
