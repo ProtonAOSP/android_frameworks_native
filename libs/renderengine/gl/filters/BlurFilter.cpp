@@ -104,7 +104,7 @@ BlurFilter::BlurFilter(GLESRenderEngine& engine)
     mUHalfPixelLoc = mUpsampleProgram.getUniformLocation("uHalfPixel");
     createVertexArray(&mUVertexArray, mUPosLoc, mUUvLoc);
 
-    mDitherFbo.allocateBuffers(64, 64, (void *) kBlurNoisePattern,
+    mDitherFbo.allocateBuffers(16, 16, (void *) kBlurNoisePattern,
                                GL_NEAREST, GL_REPEAT,
                                GL_RGB16F, GL_RGB, GL_HALF_FLOAT);
 }
@@ -455,7 +455,7 @@ string BlurFilter::getDitherMixFragShader() const {
         out vec4 fragColor;
 
         void main() {
-            vec4 blurred = texture(uBlurredTexture, vUV) + texture(uDitherTexture, gl_FragCoord.xy / 64.0);
+            vec4 blurred = texture(uBlurredTexture, vUV) + texture(uDitherTexture, gl_FragCoord.xy / 16.0);
             vec4 composition = texture(uCompositionTexture, vUV);
 
             fragColor = mix(composition, blurred, 1.0);
