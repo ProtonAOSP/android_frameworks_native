@@ -27,6 +27,9 @@
 
 #include <utils/Trace.h>
 
+#undef ALOGI
+#define ALOGI(...)
+
 // Minimum and maximum sampling offsets for each pass count, determined empirically.
 // Too low: bilinear downsampling artifacts
 // Too high: diagonal sampling artifacts
@@ -236,7 +239,6 @@ void BlurFilter::renderPass(GLFramebuffer* read, GLFramebuffer* draw, GLuint hal
 
     glBindTexture(GL_TEXTURE_2D, read->getTextureName());
     draw->bind();
-    glClear(GL_COLOR_BUFFER_BIT);
 
     // 1/2 pixel offset in texture coordinate (UV) space
     // Note that this is different from NDC!
