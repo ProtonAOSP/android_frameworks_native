@@ -123,6 +123,10 @@ private:
     GLuint mUVertexArray;
 };
 
+struct BlurSharedUniforms {
+    
+};
+
 } // namespace gl
 } // namespace renderengine
 } // namespace android

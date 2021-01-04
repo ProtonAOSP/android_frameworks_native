@@ -243,7 +243,7 @@ void BlurFilter::renderPass(GLFramebuffer* read, GLFramebuffer* draw, GLuint hal
 
     // 1/2 pixel offset in texture coordinate (UV) space
     // Note that this is different from NDC!
-    glUniform2f(halfPixelLoc, 0.5 / targetWidth, 0.5 / targetHeight);
+    glUniform2f(halfPixelLoc, 0.5 / targetWidth * mOffset, 0.5 / targetHeight * mOffset);
     drawMesh(vertexArray);
 }
 
@@ -270,7 +270,6 @@ status_t BlurFilter::prepare() {
     // Set up downsampling shader
     mDownsampleProgram.useProgram();
     glUniform1i(mDTextureLoc, 0);
-    glUniform1f(mDOffsetLoc, mOffset);
 
     // Downsample
     for (auto i = 0; i < mPasses; i++) {
@@ -286,7 +285,6 @@ status_t BlurFilter::prepare() {
     // Set up upsampling shader
     mUpsampleProgram.useProgram();
     glUniform1i(mUTextureLoc, 0);
-    glUniform1f(mUOffsetLoc, mOffset);
 
     // Upsample
     for (auto i = 0; i < mPasses; i++) {
@@ -377,7 +375,6 @@ string BlurFilter::getDownsampleFragShader() const {
         precision mediump float;
 
         uniform sampler2D uTexture;
-        uniform float uOffset;
         uniform vec2 uHalfPixel;
 
         in highp vec2 vUV;
@@ -385,10 +382,10 @@ string BlurFilter::getDownsampleFragShader() const {
 
         void main() {
             vec4 sum = texture(uTexture, vUV) * 4.0;
-            sum += texture(uTexture, vUV - uHalfPixel.xy * uOffset);
-            sum += texture(uTexture, vUV + uHalfPixel.xy * uOffset);
-            sum += texture(uTexture, vUV + vec2(uHalfPixel.x, -uHalfPixel.y) * uOffset);
-            sum += texture(uTexture, vUV - vec2(uHalfPixel.x, -uHalfPixel.y) * uOffset);
+            sum += texture(uTexture, vUV - uHalfPixel.xy);
+            sum += texture(uTexture, vUV + uHalfPixel.xy);
+            sum += texture(uTexture, vUV + vec2(uHalfPixel.x, -uHalfPixel.y));
+            sum += texture(uTexture, vUV - vec2(uHalfPixel.x, -uHalfPixel.y));
             fragColor = sum / 8.0;
         }
     )SHADER";
@@ -400,21 +397,20 @@ string BlurFilter::getUpsampleFragShader() const {
         precision mediump float;
 
         uniform sampler2D uTexture;
-        uniform float uOffset;
         uniform vec2 uHalfPixel;
 
         in highp vec2 vUV;
         out vec4 fragColor;
 
         void main() {
-            vec4 sum = texture(uTexture, vUV + vec2(-uHalfPixel.x * 2.0, 0.0) * uOffset);
-            sum += texture(uTexture, vUV + vec2(-uHalfPixel.x, uHalfPixel.y) * uOffset) * 2.0;
-            sum += texture(uTexture, vUV + vec2(0.0, uHalfPixel.y * 2.0) * uOffset);
-            sum += texture(uTexture, vUV + vec2(uHalfPixel.x, uHalfPixel.y) * uOffset) * 2.0;
-            sum += texture(uTexture, vUV + vec2(uHalfPixel.x * 2.0, 0.0) * uOffset);
-            sum += texture(uTexture, vUV + vec2(uHalfPixel.x, -uHalfPixel.y) * uOffset) * 2.0;
-            sum += texture(uTexture, vUV + vec2(0.0, -uHalfPixel.y * 2.0) * uOffset);
-            sum += texture(uTexture, vUV + vec2(-uHalfPixel.x, -uHalfPixel.y) * uOffset) * 2.0;
+            vec4 sum = texture(uTexture, vUV + vec2(-uHalfPixel.x * 2.0, 0.0));
+            sum += texture(uTexture, vUV + vec2(-uHalfPixel.x, uHalfPixel.y)) * 2.0;
+            sum += texture(uTexture, vUV + vec2(0.0, uHalfPixel.y * 2.0));
+            sum += texture(uTexture, vUV + vec2(uHalfPixel.x, uHalfPixel.y)) * 2.0;
+            sum += texture(uTexture, vUV + vec2(uHalfPixel.x * 2.0, 0.0));
+            sum += texture(uTexture, vUV + vec2(uHalfPixel.x, -uHalfPixel.y)) * 2.0;
+            sum += texture(uTexture, vUV + vec2(0.0, -uHalfPixel.y * 2.0));
+            sum += texture(uTexture, vUV + vec2(-uHalfPixel.x, -uHalfPixel.y)) * 2.0;
             fragColor = sum / 12.0;
         }
     )SHADER";
