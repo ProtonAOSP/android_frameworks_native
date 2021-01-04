@@ -95,7 +95,6 @@ private:
     GLuint mMBlurredTextureLoc;
     GLuint mMDitherTextureLoc;
     GLuint mMVertexArray;
-    GLuint mMBlueNoiseLoc;
 
     GenericProgram mDownsampleProgram;
     GLuint mDPosLoc;
