@@ -48,7 +48,6 @@ BlurFilter::BlurFilter(GLESRenderEngine& engine)
         mCompositionFbo(engine),
         mDitherFbo(engine),
         mMixProgram(engine),
-        mDitherMixProgram(engine),
         mDownsampleProgram(engine),
         mUpsampleProgram(engine) {
     // Create VBO first for usage in shader VAOs
@@ -75,15 +74,6 @@ BlurFilter::BlurFilter(GLESRenderEngine& engine)
     mMDitherTextureLoc = mMixProgram.getUniformLocation("uDitherTexture");
     mMBlurOpacityLoc = mMixProgram.getUniformLocation("uBlurOpacity");
     createVertexArray(&mMVertexArray, mMPosLoc, mMUvLoc);
-
-    mDitherMixProgram.compile(getVertexShader(), getDitherMixFragShader());
-    mDMPosLoc = mDitherMixProgram.getAttributeLocation("aPosition");
-    mDMUvLoc = mDitherMixProgram.getAttributeLocation("aUV");
-    mDMCompositionTextureLoc = mDitherMixProgram.getUniformLocation("uCompositionTexture");
-    mDMBlurredTextureLoc = mDitherMixProgram.getUniformLocation("uBlurredTexture");
-    mDMDitherTextureLoc = mDitherMixProgram.getUniformLocation("uDitherTexture");
-    mDMBlurOpacityLoc = mDitherMixProgram.getUniformLocation("uBlurOpacity");
-    createVertexArray(&mDMVertexArray, mDMPosLoc, mDMUvLoc);
 
     mDownsampleProgram.compile(getVertexShader(), getDownsampleFragShader());
     mDPosLoc = mDownsampleProgram.getAttributeLocation("aPosition");
@@ -296,7 +286,7 @@ status_t BlurFilter::prepare() {
     return NO_ERROR;
 }
 
-status_t BlurFilter::render(size_t layers, int currentLayer) {
+status_t BlurFilter::render(bool /*multiPass*/) {
     ATRACE_NAME("BlurFilter::render");
 
     // Now let's scale our blur up. It will be interpolated with the larger composited
@@ -306,7 +296,7 @@ status_t BlurFilter::render(size_t layers, int currentLayer) {
     // When doing multiple passes, we cannot try to read mCompositionFbo, given that we'll
     // be writing onto it. Let's disable the crossfade, otherwise we'd need 1 extra frame buffer,
     // as large as the screen size.
-    //if (opacity >= 1 || layers > 1) {
+    //if (opacity >= 1 || multiPass) {
     //    mLastDrawTarget->bindAsReadBuffer();
     //    glBlitFramebuffer(0, 0, mLastDrawTarget->getBufferWidth(),
     //                      mLastDrawTarget->getBufferHeight(), mDisplayX, mDisplayY, mDisplayWidth,
@@ -315,29 +305,20 @@ status_t BlurFilter::render(size_t layers, int currentLayer) {
     //}
 
     // Crossfade using mix shader
-    if (currentLayer == layers - 1) {
-        mDitherMixProgram.useProgram();
-        glUniform1f(mDMBlurOpacityLoc, opacity);
-        glUniform1i(mDMCompositionTextureLoc, 0);
-        glUniform1i(mDMBlurredTextureLoc, 1);
-        glUniform1i(mDMDitherTextureLoc, 2);
-    } else {
-        mMixProgram.useProgram();
-        glUniform1f(mMBlurOpacityLoc, opacity);
-        glUniform1i(mMCompositionTextureLoc, 0);
-        glUniform1i(mMBlurredTextureLoc, 1);
-        glUniform1i(mMDitherTextureLoc, 2);
-    }
-    ALOGI("SARU: layers=%d current=%d dither=%d", (int)layers, currentLayer, currentLayer == layers - 1);
+    mMixProgram.useProgram();
+    glUniform1f(mMBlurOpacityLoc, opacity);
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, mCompositionFbo.getTextureName());
+    glUniform1i(mMCompositionTextureLoc, 0);
 
     glActiveTexture(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_2D, mLastDrawTarget->getTextureName());
+    glUniform1i(mMBlurredTextureLoc, 1);
 
     glActiveTexture(GL_TEXTURE2);
     glBindTexture(GL_TEXTURE_2D, mDitherFbo.getTextureName());
+    glUniform1i(mMDitherTextureLoc, 2);
 
     drawMesh(mMVertexArray);
 
@@ -414,27 +395,6 @@ string BlurFilter::getUpsampleFragShader() const {
 }
 
 string BlurFilter::getMixFragShader() const {
-    return R"SHADER(
-        #version 310 es
-        precision mediump float;
-
-        uniform sampler2D uCompositionTexture;
-        uniform sampler2D uBlurredTexture;
-        uniform sampler2D uDitherTexture;
-        uniform float uBlurOpacity;
-
-        in highp vec2 vUV;
-        out vec4 fragColor;
-
-        void main() {
-            vec4 blurred = texture(uBlurredTexture, vUV);
-            vec4 composition = texture(uCompositionTexture, vUV);
-            fragColor = mix(composition, blurred, 1.0);
-        }
-    )SHADER";
-}
-
-string BlurFilter::getDitherMixFragShader() const {
     return R"SHADER(
         #version 310 es
         precision mediump float;
