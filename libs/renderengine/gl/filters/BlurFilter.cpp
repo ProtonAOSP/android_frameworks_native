@@ -251,13 +251,16 @@ status_t BlurFilter::prepare() {
 
     GLFramebuffer* read = &mCompositionFbo;
     GLFramebuffer* draw = mPassFbos[0];
-    read->bindAsReadBuffer();
-    draw->bindAsDrawBuffer();
-    glBlitFramebuffer(0, 0,
-                      read->getBufferWidth(), read->getBufferHeight(),
-                      0, 0,
-                      draw->getBufferWidth(), draw->getBufferHeight(),
-                      GL_COLOR_BUFFER_BIT, GL_LINEAR);
+    {
+        ATRACE_NAME("BlurFilter::blitCompositionBuffer");
+        read->bindAsReadBuffer();
+        draw->bindAsDrawBuffer();
+        glBlitFramebuffer(0, 0,
+                        read->getBufferWidth(), read->getBufferHeight(),
+                        0, 0,
+                        draw->getBufferWidth(), draw->getBufferHeight(),
+                        GL_COLOR_BUFFER_BIT, GL_LINEAR);
+    }
 
     ALOGI("SARU: prepare - initial dims %dx%d", mPassFbos[0]->getBufferWidth(), mPassFbos[0]->getBufferHeight());
 
