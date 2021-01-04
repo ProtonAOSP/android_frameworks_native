@@ -386,7 +386,7 @@ string BlurFilter::getDownsampleFragShader() const {
             sum += texture(uTexture, vUV + uHalfPixel.xy);
             sum += texture(uTexture, vUV + vec2(uHalfPixel.x, -uHalfPixel.y));
             sum += texture(uTexture, vUV - vec2(uHalfPixel.x, -uHalfPixel.y));
-            fragColor = sum / 8.0;
+            fragColor = sum * 0.125;
         }
     )SHADER";
 }
@@ -411,7 +411,7 @@ string BlurFilter::getUpsampleFragShader() const {
             sum += texture(uTexture, vUV + vec2(uHalfPixel.x, -uHalfPixel.y)) * 2.0;
             sum += texture(uTexture, vUV + vec2(0.0, -uHalfPixel.y * 2.0));
             sum += texture(uTexture, vUV + vec2(-uHalfPixel.x, -uHalfPixel.y)) * 2.0;
-            fragColor = sum / 12.0;
+            fragColor = sum * 0.08333333333333333;
         }
     )SHADER";
 }
