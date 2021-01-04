@@ -68,6 +68,7 @@ private:
     string getDownsampleFragShader() const;
     string getUpsampleFragShader() const;
     string getMixFragShader() const;
+    string getDitherMixFragShader() const;
 
     GLESRenderEngine& mEngine;
     // Frame buffer holding the composited background.
@@ -94,8 +95,16 @@ private:
     GLuint mMCompositionTextureLoc;
     GLuint mMBlurredTextureLoc;
     GLuint mMDitherTextureLoc;
-    GLuint mMDitherLoc;
     GLuint mMVertexArray;
+
+    GenericProgram mDitherMixProgram;
+    GLuint mDMPosLoc;
+    GLuint mDMUvLoc;
+    GLuint mDMBlurOpacityLoc;
+    GLuint mDMCompositionTextureLoc;
+    GLuint mDMBlurredTextureLoc;
+    GLuint mDMDitherTextureLoc;
+    GLuint mDMVertexArray;
 
     GenericProgram mDownsampleProgram;
     GLuint mDPosLoc;
