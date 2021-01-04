@@ -134,8 +134,7 @@ status_t BlurFilter::prepareBuffers(const DisplaySettings& display) {
 
         fbo->allocateBuffers(sourceFboWidth >> i, sourceFboHeight >> i, nullptr,
                                 GL_LINEAR, GL_CLAMP_TO_EDGE,
-                                // 2-10-10-10 reversed is the only 10-bpc format in GLES 3.1
-                                GL_RGB10_A2, GL_RGBA, GL_UNSIGNED_INT_2_10_10_10_REV);
+                                GL_RGB16F, GL_RGB, GL_HALF_FLOAT);
         if (fbo->getStatus() != GL_FRAMEBUFFER_COMPLETE) {
             ALOGE("Invalid pass buffer");
             return fbo->getStatus();
