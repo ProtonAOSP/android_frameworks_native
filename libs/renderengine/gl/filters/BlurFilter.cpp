@@ -73,6 +73,7 @@ BlurFilter::BlurFilter(GLESRenderEngine& engine)
     mMBlurredTextureLoc = mMixProgram.getUniformLocation("uBlurredTexture");
     mMDitherTextureLoc = mMixProgram.getUniformLocation("uDitherTexture");
     mMBlurOpacityLoc = mMixProgram.getUniformLocation("uBlurOpacity");
+    mMDitherLoc = mMixProgram.getUniformLocation("uDither");
     createVertexArray(&mMVertexArray, mMPosLoc, mMUvLoc);
 
     mDownsampleProgram.compile(getVertexShader(), getDownsampleFragShader());
@@ -286,7 +287,7 @@ status_t BlurFilter::prepare() {
     return NO_ERROR;
 }
 
-status_t BlurFilter::render(bool /*multiPass*/) {
+status_t BlurFilter::render(size_t layers, int currentLayer) {
     ATRACE_NAME("BlurFilter::render");
 
     // Now let's scale our blur up. It will be interpolated with the larger composited
@@ -296,7 +297,7 @@ status_t BlurFilter::render(bool /*multiPass*/) {
     // When doing multiple passes, we cannot try to read mCompositionFbo, given that we'll
     // be writing onto it. Let's disable the crossfade, otherwise we'd need 1 extra frame buffer,
     // as large as the screen size.
-    //if (opacity >= 1 || multiPass) {
+    //if (opacity >= 1 || layers > 1) {
     //    mLastDrawTarget->bindAsReadBuffer();
     //    glBlitFramebuffer(0, 0, mLastDrawTarget->getBufferWidth(),
     //                      mLastDrawTarget->getBufferHeight(), mDisplayX, mDisplayY, mDisplayWidth,
@@ -307,6 +308,8 @@ status_t BlurFilter::render(bool /*multiPass*/) {
     // Crossfade using mix shader
     mMixProgram.useProgram();
     glUniform1f(mMBlurOpacityLoc, opacity);
+    glUniform1i(mMDitherLoc, currentLayer == layers - 1);
+    ALOGI("SARU: layers=%d current=%d dither=%d", (int)layers, currentLayer, currentLayer == layers - 1);
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, mCompositionFbo.getTextureName());
@@ -403,6 +406,7 @@ string BlurFilter::getMixFragShader() const {
         uniform sampler2D uBlurredTexture;
         uniform sampler2D uDitherTexture;
         uniform float uBlurOpacity;
+        uniform bool uDither;
 
         in highp vec2 vUV;
         out vec4 fragColor;
@@ -411,13 +415,15 @@ string BlurFilter::getMixFragShader() const {
             vec4 blurred = texture(uBlurredTexture, vUV);
             vec4 composition = texture(uCompositionTexture, vUV);
 
-            // First /64: screen coordinates -> texture coordinates (UV)
-            // Second /64: reduce magnitude to make it a dither instead of an overlay (from Bayer 8x8)
-            vec3 noise = texture(uDitherTexture, gl_FragCoord.xy / 64.0).rgb;
-            // Normalize to signed [-0.5; 0.5] range and divide down to (+-)1/255
-            // This minimizes visible noise as only a 1/255 step is required for 8-bit quantization
-            vec3 dither = (noise - 0.5) / 255.0;
-            blurred = vec4(blurred.rgb + dither, 1.0);
+            if (uDither) {
+                // First /64: screen coordinates -> texture coordinates (UV)
+                // Second /64: reduce magnitude to make it a dither instead of an overlay (from Bayer 8x8)
+                vec3 noise = texture(uDitherTexture, gl_FragCoord.xy / 64.0).rgb;
+                // Normalize to signed [-0.5; 0.5] range and divide down to (+-)1/255
+                // This minimizes visible noise as only a 1/255 step is required for 8-bit quantization
+                vec3 dither = (noise - 0.5) / 255.0;
+                blurred = vec4(blurred.rgb + dither, 1.0);
+            }
 
             fragColor = mix(composition, blurred, 1.0);
         }

@@ -51,7 +51,7 @@ public:
     // Execute blur passes, rendering to offscreen texture.
     status_t prepare();
     // Render blur to the bound framebuffer (screen).
-    status_t render(bool multiPass);
+    status_t render(size_t layers, int currentLayer);
 
 private:
     uint32_t mRadius;
@@ -94,6 +94,7 @@ private:
     GLuint mMCompositionTextureLoc;
     GLuint mMBlurredTextureLoc;
     GLuint mMDitherTextureLoc;
+    GLuint mMDitherLoc;
     GLuint mMVertexArray;
 
     GenericProgram mDownsampleProgram;
