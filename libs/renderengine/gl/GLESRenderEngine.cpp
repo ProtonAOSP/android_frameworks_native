@@ -1108,6 +1108,7 @@ status_t GLESRenderEngine::drawLayers(const DisplaySettings& display,
                         .setTexCoords(2 /* size */)
                         .setCropCoords(2 /* size */)
                         .build();
+    int blurredLayers = 0;
     for (auto const layer : layers) {
         if (blurLayers.size() > 0 && blurLayers.front() == layer) {
             blurLayers.pop_front();
@@ -1139,13 +1140,15 @@ status_t GLESRenderEngine::drawLayers(const DisplaySettings& display,
                 return status;
             }
 
-            status = mBlurFilter->render(blurLayersSize > 1);
+            status = mBlurFilter->render(blurLayersSize, blurredLayers);
             if (status != NO_ERROR) {
                 ALOGE("Failed to render blur effect! Aborting GPU composition for buffer (%p).",
                       buffer->handle);
                 checkErrors("Can't render blur filter");
                 return status;
             }
+
+            blurredLayers += 1;
         }
 
         mState.maxMasteringLuminance = layer->source.buffer.maxMasteringLuminance;
