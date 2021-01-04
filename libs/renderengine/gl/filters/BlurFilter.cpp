@@ -106,7 +106,7 @@ BlurFilter::BlurFilter(GLESRenderEngine& engine)
 
     mDitherFbo.allocateBuffers(64, 64, (void *) kBlurNoisePattern,
                                GL_NEAREST, GL_REPEAT,
-                               GL_RGB, GL_RGB, GL_UNSIGNED_BYTE);
+                               GL_RGB16F, GL_RGB, GL_HALF_FLOAT);
 }
 
 status_t BlurFilter::prepareBuffers(const DisplaySettings& display) {
@@ -455,15 +455,8 @@ string BlurFilter::getDitherMixFragShader() const {
         out vec4 fragColor;
 
         void main() {
-            vec4 blurred = texture(uBlurredTexture, vUV);
+            vec4 blurred = texture(uBlurredTexture, vUV) + texture(uDitherTexture, gl_FragCoord.xy / 64.0);
             vec4 composition = texture(uCompositionTexture, vUV);
-
-            // First /64: screen coordinates -> texture coordinates (UV)
-            // Second /64: reduce magnitude to make it a dither instead of an overlay (from Bayer 8x8)
-            vec3 noise = texture(uDitherTexture, gl_FragCoord.xy / 64.0).rgb;
-            // Normalize to signed [-0.5; 0.5] range to avoid brightness shifting
-            vec3 dither = (noise - 0.5) / 64.0;
-            blurred = vec4(blurred.rgb + dither, 1.0);
 
             fragColor = mix(composition, blurred, 1.0);
         }
