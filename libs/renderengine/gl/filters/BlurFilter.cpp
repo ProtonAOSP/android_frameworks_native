@@ -447,21 +447,15 @@ string BlurFilter::getDitherMixFragShader() const {
         in highp vec2 vUV;
         out vec4 fragColor;
 
-
-        float dither17() {
-            vec3 k0 = vec3(2.0, 7.0, 23.0);
-            return fract(dot(vec3(gl_FragCoord.xy, 1.0), k0 / 17.0));
-        }
-
         void main() {
             vec4 blurred = texture(uBlurredTexture, vUV);
             vec4 composition = texture(uCompositionTexture, vUV);
 
             // First /64: screen coordinates -> texture coordinates (UV)
             // Second /64: reduce magnitude to make it a dither instead of an overlay (from Bayer 8x8)
-            //vec3 noise = texture(uDitherTexture, gl_FragCoord.xy / 64.0).rgb;
+            vec3 noise = texture(uDitherTexture, gl_FragCoord.xy / 64.0).rgb;
             // Normalize to signed [-0.5; 0.5] range to avoid brightness shifting
-            vec3 dither = vec3(dither17());
+            vec3 dither = (noise - 0.5) / 64.0;
             blurred = vec4(blurred.rgb + dither, 1.0);
 
             fragColor = mix(composition, blurred, 1.0);
