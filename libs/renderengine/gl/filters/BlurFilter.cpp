@@ -450,9 +450,11 @@ string BlurFilter::getDitherMixFragShader() const {
         out vec4 fragColor;
 
         void main() {
-            vec4 blurred = texture(uBlurredTexture, vUV) + texture(uDitherTexture, vUV * vec2(67.5, 146.25));
-            vec4 composition = texture(uCompositionTexture, vUV);
+            vec2 targetSize = vec2(textureSize(uCompositionTexture, 0));
+            vec4 dither = texture(uDitherTexture, vUV / 64.0 * targetSize);
 
+            vec4 blurred = texture(uBlurredTexture, vUV) + dither;
+            vec4 composition = texture(uCompositionTexture, vUV);
             fragColor = mix(composition, blurred, 1.0);
         }
     )SHADER";
