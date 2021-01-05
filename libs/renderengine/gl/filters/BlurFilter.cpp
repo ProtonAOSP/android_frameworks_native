@@ -102,6 +102,21 @@ BlurFilter::BlurFilter(GLESRenderEngine& engine)
     mDitherFbo.allocateBuffers(16, 16, (void *) kBlurNoisePattern,
                                GL_NEAREST, GL_REPEAT,
                                GL_RGB16F, GL_RGB, GL_HALF_FLOAT);
+
+    // Initialize uniforms
+    mDownsampleProgram.useProgram();
+    glUniform1i(mDTextureLoc, 0);
+    mUpsampleProgram.useProgram();
+    glUniform1i(mUTextureLoc, 0);
+    mDitherMixProgram.useProgram();
+    glUniform1i(mDMCompositionTextureLoc, 0);
+    glUniform1i(mDMBlurredTextureLoc, 1);
+    glUniform1i(mDMDitherTextureLoc, 2);
+    mMixProgram.useProgram();
+    glUniform1i(mMCompositionTextureLoc, 0);
+    glUniform1i(mMBlurredTextureLoc, 1);
+    glUniform1i(mMDitherTextureLoc, 2);
+    glUseProgram(0);
 }
 
 status_t BlurFilter::prepareBuffers(const DisplaySettings& display) {
@@ -263,11 +278,8 @@ status_t BlurFilter::prepare() {
 
     ALOGI("SARU: prepare - initial dims %dx%d", mPassFbos[0]->getBufferWidth(), mPassFbos[0]->getBufferHeight());
 
-    // Set up downsampling shader
-    mDownsampleProgram.useProgram();
-    glUniform1i(mDTextureLoc, 0);
-
     // Downsample
+    mDownsampleProgram.useProgram();
     for (auto i = 0; i < mPasses; i++) {
         ATRACE_NAME("BlurFilter::renderDownsamplePass");
 
@@ -278,11 +290,8 @@ status_t BlurFilter::prepare() {
         renderPass(read, draw, mDHalfPixelLoc, mDVertexArray);
     }
 
-    // Set up upsampling shader
-    mUpsampleProgram.useProgram();
-    glUniform1i(mUTextureLoc, 0);
-
     // Upsample
+    mUpsampleProgram.useProgram();
     for (auto i = 0; i < mPasses; i++) {
         ATRACE_NAME("BlurFilter::renderUpsamplePass");
 
@@ -319,15 +328,9 @@ status_t BlurFilter::render(size_t layers, int currentLayer) {
     if (currentLayer == layers - 1) {
         mDitherMixProgram.useProgram();
         glUniform1f(mDMBlurOpacityLoc, opacity);
-        glUniform1i(mDMCompositionTextureLoc, 0);
-        glUniform1i(mDMBlurredTextureLoc, 1);
-        glUniform1i(mDMDitherTextureLoc, 2);
     } else {
         mMixProgram.useProgram();
         glUniform1f(mMBlurOpacityLoc, opacity);
-        glUniform1i(mMCompositionTextureLoc, 0);
-        glUniform1i(mMBlurredTextureLoc, 1);
-        glUniform1i(mMDitherTextureLoc, 2);
     }
     ALOGI("SARU: layers=%d current=%d dither=%d", (int)layers, currentLayer, currentLayer == layers - 1);
 
