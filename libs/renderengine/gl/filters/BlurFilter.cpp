@@ -495,7 +495,7 @@ string BlurFilter::getDitherMixFragShader() const {
         out vec4 fragColor;
 
         void main() {
-            vec4 blurred = texture(uBlurredTexture, vUV) + texelFetch(uDitherTexture, ivec2(int(mod(gl_FragCoord.x, 16.0)), int(mod(gl_FragCoord.y, 16.0))), 0);
+            vec4 blurred = texture(uBlurredTexture, vUV) + texture(uDitherTexture, vUV * vec2(67.5, 146.25));
             vec4 composition = texture(uCompositionTexture, vUV);
 
             fragColor = mix(composition, blurred, 1.0);
