@@ -57,16 +57,11 @@ BlurFilter::BlurFilter(GLESRenderEngine& engine)
     // Create VBO first for usage in shader VAOs
     static constexpr auto size = 2.0f;
     static constexpr auto translation = 1.0f;
-    // This represents the rectangular display with a single oversized triangle.
     const GLfloat vboData[] = {
-        // Vertex data
-        translation - size, -translation - size,
-        translation - size, -translation + size,
-        translation + size, -translation + size,
-        // UV data
-        0.0f, 0.0f - translation,
-        0.0f, size - translation,
-        size, size - translation
+        // Position                              // UV
+        translation - size, -translation - size, 0.0f, 0.0f - translation,
+        translation - size, -translation + size, 0.0f, size - translation,
+        translation + size, -translation + size, size, size - translation,
     };
     mMeshBuffer.allocateBuffers(vboData, 12 /* size */);
 
@@ -214,11 +209,12 @@ void BlurFilter::createVertexArray(GLuint* vertexArray, GLuint position, GLuint 
 
     glEnableVertexAttribArray(position);
     glVertexAttribPointer(position, 2 /* size */, GL_FLOAT, GL_FALSE,
-                          2 * sizeof(GLfloat) /* stride */, 0 /* offset */);
+                          4 * sizeof(GLfloat) /* stride */, 0 /* offset */);
 
     glEnableVertexAttribArray(uv);
-    glVertexAttribPointer(uv, 2 /* size */, GL_FLOAT, GL_FALSE, 0 /* stride */,
-                          (GLvoid*)(6 * sizeof(GLfloat)) /* offset */);
+    glVertexAttribPointer(uv, 2 /* size */, GL_FLOAT, GL_FALSE,
+                          4 * sizeof(GLfloat) /* stride */,
+                          (GLvoid*)(2 * sizeof(GLfloat)) /* offset */);
 
     mMeshBuffer.unbind();
     glBindVertexArray(0);
