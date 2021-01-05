@@ -99,7 +99,7 @@ BlurFilter::BlurFilter(GLESRenderEngine& engine)
     mUHalfPixelLoc = mUpsampleProgram.getUniformLocation("uHalfPixel");
     createVertexArray(&mUVertexArray, mUPosLoc, mUUvLoc);
 
-    mDitherFbo.allocateBuffers(16, 16, (void *) kBlurNoisePattern,
+    mDitherFbo.allocateBuffers(64, 64, (void *) kBlurNoisePattern,
                                GL_NEAREST, GL_REPEAT,
                                GL_RGB16F, GL_RGB, GL_HALF_FLOAT);
 
