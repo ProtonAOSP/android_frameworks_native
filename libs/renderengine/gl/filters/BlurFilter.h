@@ -64,11 +64,9 @@ private:
     void drawMesh(GLuint vertexArray);
     void renderPass(GLFramebuffer* read, GLFramebuffer* draw, GLuint halfPixel, GLuint vertexArray);
 
-    string getDownsampleVertShader() const;
+    string getVertexShader() const;
     string getDownsampleFragShader() const;
-    string getUpsampleVertShader() const;
     string getUpsampleFragShader() const;
-    string getMixVertShader() const;
     string getMixFragShader() const;
     string getDitherMixFragShader() const;
 

@@ -65,23 +65,7 @@ BlurFilter::BlurFilter(GLESRenderEngine& engine)
     };
     mMeshBuffer.allocateBuffers(vboData, 12 /* size */);
 
-    mDownsampleProgram.compile(getDownsampleVertShader(), getDownsampleFragShader());
-    mDPosLoc = mDownsampleProgram.getAttributeLocation("aPosition");
-    mDUvLoc = mDownsampleProgram.getAttributeLocation("aUV");
-    mDTextureLoc = mDownsampleProgram.getUniformLocation("uTexture");
-    mDOffsetLoc = mDownsampleProgram.getUniformLocation("uOffset");
-    mDHalfPixelLoc = mDownsampleProgram.getUniformLocation("uHalfPixel");
-    createVertexArray(&mDVertexArray, mDPosLoc, mDUvLoc);
-
-    mUpsampleProgram.compile(getUpsampleVertShader(), getUpsampleFragShader());
-    mUPosLoc = mUpsampleProgram.getAttributeLocation("aPosition");
-    mUUvLoc = mUpsampleProgram.getAttributeLocation("aUV");
-    mUTextureLoc = mUpsampleProgram.getUniformLocation("uTexture");
-    mUOffsetLoc = mUpsampleProgram.getUniformLocation("uOffset");
-    mUHalfPixelLoc = mUpsampleProgram.getUniformLocation("uHalfPixel");
-    createVertexArray(&mUVertexArray, mUPosLoc, mUUvLoc);
-
-    mMixProgram.compile(getMixVertShader(), getMixFragShader());
+    mMixProgram.compile(getVertexShader(), getMixFragShader());
     mMPosLoc = mMixProgram.getAttributeLocation("aPosition");
     mMUvLoc = mMixProgram.getAttributeLocation("aUV");
     mMCompositionTextureLoc = mMixProgram.getUniformLocation("uCompositionTexture");
@@ -90,7 +74,7 @@ BlurFilter::BlurFilter(GLESRenderEngine& engine)
     mMBlurOpacityLoc = mMixProgram.getUniformLocation("uBlurOpacity");
     createVertexArray(&mMVertexArray, mMPosLoc, mMUvLoc);
 
-    mDitherMixProgram.compile(getMixVertShader(), getDitherMixFragShader());
+    mDitherMixProgram.compile(getVertexShader(), getDitherMixFragShader());
     mDMPosLoc = mDitherMixProgram.getAttributeLocation("aPosition");
     mDMUvLoc = mDitherMixProgram.getAttributeLocation("aUV");
     mDMCompositionTextureLoc = mDitherMixProgram.getUniformLocation("uCompositionTexture");
@@ -98,6 +82,22 @@ BlurFilter::BlurFilter(GLESRenderEngine& engine)
     mDMDitherTextureLoc = mDitherMixProgram.getUniformLocation("uDitherTexture");
     mDMBlurOpacityLoc = mDitherMixProgram.getUniformLocation("uBlurOpacity");
     createVertexArray(&mDMVertexArray, mDMPosLoc, mDMUvLoc);
+
+    mDownsampleProgram.compile(getVertexShader(), getDownsampleFragShader());
+    mDPosLoc = mDownsampleProgram.getAttributeLocation("aPosition");
+    mDUvLoc = mDownsampleProgram.getAttributeLocation("aUV");
+    mDTextureLoc = mDownsampleProgram.getUniformLocation("uTexture");
+    mDOffsetLoc = mDownsampleProgram.getUniformLocation("uOffset");
+    mDHalfPixelLoc = mDownsampleProgram.getUniformLocation("uHalfPixel");
+    createVertexArray(&mDVertexArray, mDPosLoc, mDUvLoc);
+
+    mUpsampleProgram.compile(getVertexShader(), getUpsampleFragShader());
+    mUPosLoc = mUpsampleProgram.getAttributeLocation("aPosition");
+    mUUvLoc = mUpsampleProgram.getAttributeLocation("aUV");
+    mUTextureLoc = mUpsampleProgram.getUniformLocation("uTexture");
+    mUOffsetLoc = mUpsampleProgram.getUniformLocation("uOffset");
+    mUHalfPixelLoc = mUpsampleProgram.getUniformLocation("uHalfPixel");
+    createVertexArray(&mUVertexArray, mUPosLoc, mUUvLoc);
 
     mDitherFbo.allocateBuffers(16, 16, (void *) kBlurNoisePattern,
                                GL_NEAREST, GL_REPEAT,
@@ -349,26 +349,17 @@ status_t BlurFilter::render(size_t layers, int currentLayer) {
     return NO_ERROR;
 }
 
-string BlurFilter::getDownsampleVertShader() const {
+string BlurFilter::getVertexShader() const {
     return R"SHADER(
         #version 310 es
         precision mediump float;
 
-        uniform vec2 uHalfPixel;
-
         in vec2 aPosition;
         in highp vec2 aUV;
         out highp vec2 vUV;
-        out vec2 vDownTaps[4];
 
         void main() {
             vUV = aUV;
-
-            vDownTaps[0] = aUV - uHalfPixel.xy;
-            vDownTaps[1] = aUV + uHalfPixel.xy;
-            vDownTaps[2] = aUV + vec2(uHalfPixel.x, -uHalfPixel.y);
-            vDownTaps[3] = aUV - vec2(uHalfPixel.x, -uHalfPixel.y);
-
             gl_Position = vec4(aPosition, 0.0, 1.0);
         }
     )SHADER";
@@ -380,47 +371,18 @@ string BlurFilter::getDownsampleFragShader() const {
         precision mediump float;
 
         uniform sampler2D uTexture;
+        uniform vec2 uHalfPixel;
 
         in highp vec2 vUV;
-        in vec2 vDownTaps[4];
         out vec4 fragColor;
 
         void main() {
             vec4 sum = texture(uTexture, vUV) * 4.0;
-            sum += texture(uTexture, vDownTaps[0]);
-            sum += texture(uTexture, vDownTaps[1]);
-            sum += texture(uTexture, vDownTaps[2]);
-            sum += texture(uTexture, vDownTaps[3]);
+            sum += texture(uTexture, vUV - uHalfPixel.xy);
+            sum += texture(uTexture, vUV + uHalfPixel.xy);
+            sum += texture(uTexture, vUV + vec2(uHalfPixel.x, -uHalfPixel.y));
+            sum += texture(uTexture, vUV - vec2(uHalfPixel.x, -uHalfPixel.y));
             fragColor = sum * 0.125;
-        }
-    )SHADER";
-}
-
-string BlurFilter::getUpsampleVertShader() const {
-    return R"SHADER(
-        #version 310 es
-        precision mediump float;
-
-        uniform vec2 uHalfPixel;
-
-        in vec2 aPosition;
-        in highp vec2 aUV;
-        out highp vec2 vUV;
-        out vec2 vUpTaps[8];
-
-        void main() {
-            vUV = aUV;
-
-            vUpTaps[0] = aUV + vec2(-uHalfPixel.x * 2.0, 0.0);
-            vUpTaps[1] = aUV + vec2(-uHalfPixel.x, uHalfPixel.y);
-            vUpTaps[2] = aUV + vec2(0.0, uHalfPixel.y * 2.0);
-            vUpTaps[3] = aUV + vec2(uHalfPixel.x, uHalfPixel.y);
-            vUpTaps[4] = aUV + vec2(uHalfPixel.x * 2.0, 0.0);
-            vUpTaps[5] = aUV + vec2(uHalfPixel.x, -uHalfPixel.y);
-            vUpTaps[6] = aUV + vec2(0.0, -uHalfPixel.y * 2.0);
-            vUpTaps[7] = aUV + vec2(-uHalfPixel.x, -uHalfPixel.y);
-
-            gl_Position = vec4(aPosition, 0.0, 1.0);
         }
     )SHADER";
 }
@@ -431,37 +393,21 @@ string BlurFilter::getUpsampleFragShader() const {
         precision mediump float;
 
         uniform sampler2D uTexture;
+        uniform vec2 uHalfPixel;
 
         in highp vec2 vUV;
-        in vec2 vUpTaps[8];
         out vec4 fragColor;
 
         void main() {
-            vec4 sum = texture(uTexture, vUpTaps[0]);
-            sum += texture(uTexture, vUpTaps[1]) * 2.0;
-            sum += texture(uTexture, vUpTaps[2]);
-            sum += texture(uTexture, vUpTaps[3]) * 2.0;
-            sum += texture(uTexture, vUpTaps[4]);
-            sum += texture(uTexture, vUpTaps[5]) * 2.0;
-            sum += texture(uTexture, vUpTaps[6]);
-            sum += texture(uTexture, vUpTaps[7]) * 2.0;
+            vec4 sum = texture(uTexture, vUV + vec2(-uHalfPixel.x * 2.0, 0.0));
+            sum += texture(uTexture, vUV + vec2(-uHalfPixel.x, uHalfPixel.y)) * 2.0;
+            sum += texture(uTexture, vUV + vec2(0.0, uHalfPixel.y * 2.0));
+            sum += texture(uTexture, vUV + vec2(uHalfPixel.x, uHalfPixel.y)) * 2.0;
+            sum += texture(uTexture, vUV + vec2(uHalfPixel.x * 2.0, 0.0));
+            sum += texture(uTexture, vUV + vec2(uHalfPixel.x, -uHalfPixel.y)) * 2.0;
+            sum += texture(uTexture, vUV + vec2(0.0, -uHalfPixel.y * 2.0));
+            sum += texture(uTexture, vUV + vec2(-uHalfPixel.x, -uHalfPixel.y)) * 2.0;
             fragColor = sum * 0.08333333333333333;
-        }
-    )SHADER";
-}
-
-string BlurFilter::getMixVertShader() const {
-    return R"SHADER(
-        #version 310 es
-        precision mediump float;
-
-        in vec2 aPosition;
-        in highp vec2 aUV;
-        out highp vec2 vUV;
-
-        void main() {
-            vUV = aUV;
-            gl_Position = vec4(aPosition, 0.0, 1.0);
         }
     )SHADER";
 }
