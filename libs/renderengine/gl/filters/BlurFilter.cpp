@@ -359,13 +359,15 @@ string BlurFilter::getDownsampleVertShader() const {
         in vec2 aPosition;
         in highp vec2 aUV;
         out highp vec2 vUV;
-        out vec4 vDownTaps[2];
+        out vec2 vDownTaps[4];
 
         void main() {
             vUV = aUV;
 
-            vDownTaps[0] = vec4(aUV - uHalfPixel.xy, aUV + uHalfPixel.xy);
-            vDownTaps[1] = vec4(aUV + vec2(uHalfPixel.x, -uHalfPixel.y), aUV - vec2(uHalfPixel.x, -uHalfPixel.y));
+            vDownTaps[0] = aUV - uHalfPixel.xy;
+            vDownTaps[1] = aUV + uHalfPixel.xy;
+            vDownTaps[2] = aUV + vec2(uHalfPixel.x, -uHalfPixel.y);
+            vDownTaps[3] = aUV - vec2(uHalfPixel.x, -uHalfPixel.y);
 
             gl_Position = vec4(aPosition, 0.0, 1.0);
         }
@@ -380,15 +382,15 @@ string BlurFilter::getDownsampleFragShader() const {
         uniform sampler2D uTexture;
 
         in highp vec2 vUV;
-        in vec4 vDownTaps[2];
+        in vec2 vDownTaps[4];
         out vec4 fragColor;
 
         void main() {
             vec4 sum = texture(uTexture, vUV) * 4.0;
-            sum += texture(uTexture, vDownTaps[0].xy);
-            sum += texture(uTexture, vDownTaps[0].zw);
-            sum += texture(uTexture, vDownTaps[1].xy);
-            sum += texture(uTexture, vDownTaps[1].zw);
+            sum += texture(uTexture, vDownTaps[0]);
+            sum += texture(uTexture, vDownTaps[1]);
+            sum += texture(uTexture, vDownTaps[2]);
+            sum += texture(uTexture, vDownTaps[3]);
             fragColor = sum * 0.125;
         }
     )SHADER";
@@ -404,15 +406,19 @@ string BlurFilter::getUpsampleVertShader() const {
         in vec2 aPosition;
         in highp vec2 aUV;
         out highp vec2 vUV;
-        out vec4 vUpTaps[4];
+        out vec2 vUpTaps[8];
 
         void main() {
             vUV = aUV;
 
-            vUpTaps[0] = vec4(aUV + vec2(-uHalfPixel.x * 2.0, 0.0), aUV + vec2(-uHalfPixel.x, uHalfPixel.y));
-            vUpTaps[1] = vec4(aUV + vec2(0.0, uHalfPixel.y * 2.0), aUV + vec2(uHalfPixel.x, uHalfPixel.y));
-            vUpTaps[2] = vec4(aUV + vec2(uHalfPixel.x * 2.0, 0.0), aUV + vec2(uHalfPixel.x, -uHalfPixel.y));
-            vUpTaps[3] = vec4(aUV + vec2(0.0, -uHalfPixel.y * 2.0), aUV + vec2(-uHalfPixel.x, -uHalfPixel.y));
+            vUpTaps[0] = aUV + vec2(-uHalfPixel.x * 2.0, 0.0);
+            vUpTaps[1] = aUV + vec2(-uHalfPixel.x, uHalfPixel.y);
+            vUpTaps[2] = aUV + vec2(0.0, uHalfPixel.y * 2.0);
+            vUpTaps[3] = aUV + vec2(uHalfPixel.x, uHalfPixel.y);
+            vUpTaps[4] = aUV + vec2(uHalfPixel.x * 2.0, 0.0);
+            vUpTaps[5] = aUV + vec2(uHalfPixel.x, -uHalfPixel.y);
+            vUpTaps[6] = aUV + vec2(0.0, -uHalfPixel.y * 2.0);
+            vUpTaps[7] = aUV + vec2(-uHalfPixel.x, -uHalfPixel.y);
 
             gl_Position = vec4(aPosition, 0.0, 1.0);
         }
@@ -427,18 +433,18 @@ string BlurFilter::getUpsampleFragShader() const {
         uniform sampler2D uTexture;
 
         in highp vec2 vUV;
-        in vec4 vUpTaps[4];
+        in vec2 vUpTaps[8];
         out vec4 fragColor;
 
         void main() {
-            vec4 sum = texture(uTexture, vUpTaps[0].xy);
-            sum += texture(uTexture, vUpTaps[0].zw) * 2.0;
-            sum += texture(uTexture, vUpTaps[1].xy);
-            sum += texture(uTexture, vUpTaps[1].zw) * 2.0;
-            sum += texture(uTexture, vUpTaps[2].xy);
-            sum += texture(uTexture, vUpTaps[2].zw) * 2.0;
-            sum += texture(uTexture, vUpTaps[3].xy);
-            sum += texture(uTexture, vUpTaps[3].zw) * 2.0;
+            vec4 sum = texture(uTexture, vUpTaps[0]);
+            sum += texture(uTexture, vUpTaps[1]) * 2.0;
+            sum += texture(uTexture, vUpTaps[2]);
+            sum += texture(uTexture, vUpTaps[3]) * 2.0;
+            sum += texture(uTexture, vUpTaps[4]);
+            sum += texture(uTexture, vUpTaps[5]) * 2.0;
+            sum += texture(uTexture, vUpTaps[6]);
+            sum += texture(uTexture, vUpTaps[7]) * 2.0;
             fragColor = sum * 0.08333333333333333;
         }
     )SHADER";
